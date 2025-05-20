@@ -1,0 +1,11 @@
+{
+  "name": "nova-bpt",
+  "version": "1.0.0",
+  "description": "This project demonstrates various AWS AI services:\r - Text-to-Speech with AWS Polly\r - Live Transcription with AWS Transcribe\r - AI Responses with Claude on AWS Bedrock",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
