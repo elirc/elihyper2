@@ -1,4 +1,4 @@
-# AWS AI Services Demo
+# AWS AI Services Backend
 
 This project demonstrates various AWS AI services:
 - Text-to-Speech with AWS Polly

@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Transcribe Audio in Browser</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    nav {
+      margin-bottom: 20px;
+    }
+    nav a {
+      margin-right: 15px;
+    }
+    button {
+      padding: 10px 15px;
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background-color: #cccccc;
+    }
+    select {
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      margin-right: 10px;
+      min-width: 250px;
+    }
+    .control-group {
+      margin: 15px 0;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .control-group label {
+      margin-right: 10px;
+      min-width: 140px;
+    }
+    .refresh-btn {
+      padding: 8px;
+      margin-left: 5px;
+      background-color: #f1f1f1;
+      color: #333;
+    }
+    pre {
+      background-color: #f5f5f5;
+      padding: 15px;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      min-height: 100px;
+    }
+    #status {
+      margin: 10px 0;
+      color: #666;
+    }
+    .error {
+      color: #d23f31;
+    }
+    #debug {
+      font-size: 12px;
+      margin-top: 20px;
+      color: #888;
+      max-height: 150px;
+      overflow-y: auto;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="text-to-speech.html">Text To Speech - AWS Polly</a>
+    <a href="transcribe.html">Transcribe - AWS Transcribe</a>
+    <a href="claude.html">Response - Claude via AWS Bedrock</a>
+  </nav>
+  <h1>Live Transcription</h1>
+
+  <div class="control-group">
+    <label for="mic-select">Select Microphone:</label>
+    <select id="mic-select"></select>
+    <button class="refresh-btn" id="refresh-mics" title="Refresh microphone list">↻</button>
+  </div>
+
+  <div class="control-group">
+    <button id="start">Start Transcription</button>
+    <button id="stop" disabled>Stop Transcription</button>
+  </div>
+
+  <div id="status">Ready to transcribe</div>
+  <pre id="output"></pre>
+  <button id="toggle-debug">Show Debug Info</button>
+  <pre id="debug"></pre>
+
+  <script>
+    const output = document.getElementById('output');
+    const startButton = document.getElementById('start');
+    const stopButton = document.getElementById('stop');
+    const status = document.getElementById('status');
+    const debug = document.getElementById('debug');
+    const toggleDebug = document.getElementById('toggle-debug');
+    const micSelect = document.getElementById('mic-select');
+    const refreshMicsButton = document.getElementById('refresh-mics');
+
+    // Initialize microphone selection dropdown
+    async function initializeMicrophoneList() {
+      try {
+        micSelect.innerHTML = '<option value="">Loading microphones...</option>';
+
+        // Get permission to access devices (required for device labels)
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+          logDebug(`Error getting initial permission: ${err.message}`);
+          micSelect.innerHTML = '<option value="">No microphone access</option>';
+          return;
+        }
+
+        // Get the list of devices
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(device => device.kind === 'audioinput');
+
+        // Stop the temporary stream
+        stream.getTracks().forEach(track => track.stop());
+
+        if (audioInputs.length === 0) {
+          micSelect.innerHTML = '<option value="">No microphones found</option>';
+          logDebug('No audio input devices found');
+          return;
+        }
+
+        // Populate the dropdown with microphones
+        micSelect.innerHTML = '';
+        audioInputs.forEach((device, index) => {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.text = device.label || `Microphone ${index + 1}`;
+          micSelect.appendChild(option);
+        });
+
+        logDebug(`Found ${audioInputs.length} audio input devices`);
+
+        // Select the default microphone (usually index 0)
+        if (micSelect.options.length > 0) {
+          micSelect.selectedIndex = 0;
+        }
+
+      } catch (err) {
+        logDebug(`Error initializing microphone list: ${err.message}`);
+        micSelect.innerHTML = '<option value="">Error loading microphones</option>';
+      }
+    }
+
+    // Refresh the microphone list when requested
+    refreshMicsButton.addEventListener('click', () => {
+      logDebug('Refreshing microphone list');
+      initializeMicrophoneList();
+    });
+
+    // Show/hide debug panel
+    toggleDebug.addEventListener('click', () => {
+      if (debug.style.display === 'none') {
+        debug.style.display = 'block';
+        toggleDebug.textContent = 'Hide Debug Info';
+      } else {
+        debug.style.display = 'none';
+        toggleDebug.textContent = 'Show Debug Info';
+      }
+    });
+
+    function logDebug(message) {
+      const timestamp = new Date().toISOString().substr(11, 8);
+      debug.textContent += `[${timestamp}] ${message}\n`;
+      debug.scrollTop = debug.scrollHeight;
+    }
+
+    // Initialize the microphone list on page load
+    document.addEventListener('DOMContentLoaded', initializeMicrophoneList);
+
+    let socket, audioContext, processor, stream;
+
+    startButton.onclick = async () => {
+      try {
+        // Clear previous transcription
+        output.textContent = '';
+        debug.textContent = '';
+        status.textContent = 'Checking microphone...';
+        status.classList.remove('error');
+
+        // Check for microphone before proceeding
+        const hasMicrophone = await checkMicrophoneAvailability();
+        if (!hasMicrophone) {
+          throw new Error('No microphone detected. Please connect a microphone and try again.');
+        }
+
+        status.textContent = 'Connecting to AWS Transcribe...';
+
+        // Get signed WebSocket URL
+        const res = await fetch('/get-signed-url');
+        if (!res.ok) {
+          throw new Error(`Failed to get signed URL: ${res.status} ${res.statusText}`);
+        }
+
+        const { url } = await res.json();
+        logDebug(`Got signed URL: ${url.substring(0, 100)}...`);
+
+        // Create WebSocket connection
+        socket = new WebSocket(url);
+        socket.binaryType = 'arraybuffer';
+
+        // Wait for connection or failure
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error("WebSocket connection timed out"));
+          }, 10000);
+
+          socket.onopen = () => {
+            clearTimeout(timeout);
+            logDebug('WebSocket connection opened successfully');
+            resolve();
+          };
+
+          socket.onerror = (event) => {
+            clearTimeout(timeout);
+            logDebug('WebSocket connection error during setup');
+            reject(new Error("WebSocket connection failed"));
+          };
+        });
+
+        // Now that WebSocket is open, continue with setup
+        status.textContent = 'Connected! Requesting microphone access...';
+
+        try {
+          // Request microphone access with the selected device
+          const constraints = {
+            audio: {
+              deviceId: micSelect.value ? { exact: micSelect.value } : undefined,
+              sampleRate: 16000,
+              channelCount: 1,
+            }
+          };
+
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          logDebug('Microphone access granted for device: ' + micSelect.options[micSelect.selectedIndex].text);
+
+          // Create audio processing pipeline
+          audioContext = new AudioContext({
+            sampleRate: 16000,  // Must be 16kHz for AWS Transcribe
+            latencyHint: 'interactive'
+          });
+          processor = audioContext.createScriptProcessor(4096, 1, 1);  // Use larger buffer for better performance
+
+          // Connect the microphone stream to the ScriptProcessorNode
+          const source = audioContext.createMediaStreamSource(stream);
+          source.connect(processor);
+          processor.connect(audioContext.destination);
+
+          // Add this function before the onaudioprocess handler
+          async function resampleTo16kHz(input, inputSampleRate) {
+            if (inputSampleRate === 16000) return input;
+            const offlineCtx = new OfflineAudioContext(1, Math.ceil(input.length * 16000 / inputSampleRate), 16000);
+            const buffer = offlineCtx.createBuffer(1, input.length, inputSampleRate);
+            buffer.copyToChannel(input, 0);
+            const source = offlineCtx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(offlineCtx.destination);
+            source.start();
+            const rendered = await offlineCtx.startRendering();
+            return rendered.getChannelData(0);
+          }
+
+          // Replace the onaudioprocess handler with the async version
+          processor.onaudioprocess = async e => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              try {
+                let input = e.inputBuffer.getChannelData(0);
+
+                // Ensure we have valid audio data
+                if (input.length === 0) {
+                  logDebug('Empty audio buffer received');
+                  return;
+                }
+
+                // RESAMPLE if needed
+                if (audioContext.sampleRate !== 16000) {
+                  input = await resampleTo16kHz(input, audioContext.sampleRate);
+                }
+
+                // Convert to 16-bit PCM
+                const pcmBuffer = floatTo16BitPCM(input);
+
+                // Log audio details for debugging
+                if (Math.random() < 0.01) {
+                  const sample = new Int16Array(pcmBuffer).slice(0, 5);
+                  logDebug(`Audio details:\n  Sample rate: ${audioContext.sampleRate}\n  Buffer size: ${input.length}\n  PCM data size: ${pcmBuffer.byteLength}\n  Sample values: ${Array.from(sample).join(', ')}\n`);
+                }
+
+                // Create the event stream encoded message
+                const eventStreamMsg = buildEventStreamMessage(pcmBuffer);
+
+                // Send the event stream encoded message
+                socket.send(eventStreamMsg);
+              } catch (err) {
+                logDebug(`Error sending audio: ${err.message}`);
+                console.error('Audio processing error:', err);
+              }
+            }
+          };
+
+          status.textContent = 'Transcribing... (speak now)';
+          startButton.disabled = true;
+          stopButton.disabled = false;
+        } catch (err) {
+          logDebug(`Microphone error: ${err.message}`);
+          status.textContent = `Error accessing microphone: ${err.message}`;
+          status.classList.add('error');
+          socket.close();
+        }
+
+        // Handle incoming WebSocket messages
+        socket.onmessage = (msg) => {
+          try {
+            let jsonData = null;
+
+            if (msg.data instanceof ArrayBuffer) {
+              // Parse AWS event stream message to extract payload JSON
+              try {
+                const { headers, payload } = parseEventStreamMessage(msg.data);
+                if (headers[":event-type"] === "TranscriptEvent") {
+                  const textPayload = new TextDecoder("utf-8").decode(payload);
+                  jsonData = JSON.parse(textPayload);
+                } else {
+                  // Not a transcript – log for debug
+                  logDebug(`Non-transcript event: ${headers[":event-type"] || "unknown"}`);
+                  return;
+                }
+              } catch (err) {
+                logDebug(`Event stream parse error: ${err.message}`);
+                return;
+              }
+            } else if (typeof msg.data === 'string') {
+              // Fallback: plain string JSON (rare)
+              try {
+                jsonData = JSON.parse(msg.data);
+              } catch (_) {
+                logDebug('Received string but failed to parse as JSON');
+                return;
+              }
+            }
+
+            if (!jsonData) return;
+
+            // Process the transcript data
+            if (jsonData && jsonData.Transcript && jsonData.Transcript.Results) {
+              const results = jsonData.Transcript.Results;
+              logDebug(`Processing transcript results: ${JSON.stringify(results)}`);
+
+              if (results.length > 0 && results[0].Alternatives && results[0].Alternatives.length > 0) {
+                const transcript = results[0].Alternatives[0].Transcript;
+
+                if (!results[0].IsPartial) {
+                  output.textContent += transcript + "\n";
+                  logDebug(`Final transcript: ${transcript}`);
+                } else {
+                  status.textContent = `Partial: ${transcript}`;
+                  logDebug(`Partial transcript: ${transcript}`);
+                }
+              }
+            } else if (jsonData) {
+              // Log the structure of the JSON for debugging
+              logDebug(`JSON structure: ${JSON.stringify(Object.keys(jsonData))}`);
+            }
+          } catch (err) {
+            logDebug(`Error processing message: ${err.message}`);
+            console.error('Error processing transcript:', err);
+            status.textContent = `Processing error: ${err.message}`;
+            status.classList.add('error');
+          }
+        };
+
+        socket.onerror = (event) => {
+          logDebug('WebSocket error occurred');
+          console.error('WebSocket error:', event);
+          status.textContent = 'WebSocket error occurred';
+          status.classList.add('error');
+          cleanup();
+        };
+
+        socket.onclose = (event) => {
+          logDebug(`WebSocket closed: ${event.code} ${event.reason}`);
+          status.textContent = `WebSocket closed: ${event.code} ${event.reason || ''}`;
+          cleanup();
+        };
+
+      } catch (err) {
+        logDebug(`Startup error: ${err.message}`);
+        status.textContent = `Error: ${err.message}`;
+        status.classList.add('error');
+        console.error('Transcription startup error:', err);
+        cleanup();
+      }
+    };
+
+    stopButton.onclick = () => {
+      logDebug('User stopped transcription');
+      status.textContent = 'Transcription stopped';
+      cleanup();
+    };
+
+    function cleanup() {
+      logDebug('Running cleanup');
+
+      // Close WebSocket
+      if (socket) {
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+          socket.close();
+          logDebug('WebSocket closed');
+        }
+        socket = null;
+      }
+
+      // Stop audio processing
+      if (processor) {
+        try {
+          processor.disconnect();
+          logDebug('Audio processing stopped');
+        } catch (err) {
+          logDebug(`Error disconnecting audio: ${err.message}`);
+        }
+      }
+
+      // Reset UI
+      startButton.disabled = false;
+      stopButton.disabled = true;
+    }
+
+    // Convert Float32 [-1,1] to 16-bit PCM Little Endian
+    function floatTo16BitPCM(float32Array) {
+      const buffer = new ArrayBuffer(float32Array.length * 2);
+      const view = new DataView(buffer);
+      for (let i = 0; i < float32Array.length; i++) {
+        let s = Math.max(-1, Math.min(1, float32Array[i]));
+        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true); // little-endian
+      }
+      return buffer;
+    }
+
+    // Build AWS event stream message for audio chunk
+    function buildEventStreamMessage(pcmBuffer) {
+      // Headers
+      const headers = [
+        { name: ':content-type', value: 'application/octet-stream' },
+        { name: ':event-type', value: 'AudioEvent' },
+        { name: ':message-type', value: 'event' }
+      ];
+      // Calculate headers length (nameLen[1] + name + type[1] + valueLen[2] + value)
+      let headersLength = 0;
+      headers.forEach(h => {
+        headersLength += 1 + h.name.length + 1 + 2 + h.value.length;
+      });
+      const payloadLength = pcmBuffer.byteLength;
+      const totalLength = 4 + 4 + 4 + headersLength + payloadLength + 4; // prelude, preludeCRC, headers, payload, msgCRC
+
+      const buffer = new ArrayBuffer(totalLength);
+      const view = new DataView(buffer);
+      let offset = 0;
+
+      // Prelude: total length, headers length
+      view.setUint32(offset, totalLength, false); offset += 4;
+      view.setUint32(offset, headersLength, false); offset += 4;
+
+      // Prelude CRC32
+      const preludeCRC = crc32(new Uint8Array(buffer, 0, 8));
+      view.setUint32(offset, preludeCRC, false); offset += 4;
+
+      // Headers
+      headers.forEach(h => {
+        view.setUint8(offset++, h.name.length);
+        for (let i = 0; i < h.name.length; i++) view.setUint8(offset++, h.name.charCodeAt(i));
+        view.setUint8(offset++, 7); // type: string (7)
+        view.setUint16(offset, h.value.length, false); // 2-byte big-endian length
+        offset += 2;
+        for (let i = 0; i < h.value.length; i++) view.setUint8(offset++, h.value.charCodeAt(i));
+      });
+
+      // Payload
+      new Uint8Array(buffer, offset, payloadLength).set(new Uint8Array(pcmBuffer));
+      offset += payloadLength;
+
+      // Message CRC32
+      const msgCRC = crc32(new Uint8Array(buffer, 0, offset));
+      view.setUint32(offset, msgCRC, false);
+
+      return buffer;
+    }
+
+    // CRC32 implementation (standard, for AWS event stream)
+    function crc32(data) {
+      let crc = ~0;
+      for (let i = 0; i < data.length; i++) {
+        crc = (crc >>> 8) ^ crc32Table[(crc ^ data[i]) & 0xFF];
+      }
+      return ~crc >>> 0;
+    }
+    const crc32Table = (() => {
+      let c, table = [];
+      for (let n = 0; n < 256; n++) {
+        c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+        table[n] = c;
+      }
+      return table;
+    })();
+
+    // Parse AWS event stream message and return headers map and payload Uint8Array
+    function parseEventStreamMessage(arrayBuffer) {
+      const view = new DataView(arrayBuffer);
+      let offset = 0;
+      const totalLen = view.getUint32(offset, false); offset += 4;
+      const headersLen = view.getUint32(offset, false); offset += 4;
+      offset += 4; // skip prelude CRC
+
+      const headers = {};
+      let headersConsumed = 0;
+      while (headersConsumed < headersLen) {
+        const nameLen = view.getUint8(offset++);
+        let name = '';
+        for (let i = 0; i < nameLen; i++) {
+          name += String.fromCharCode(view.getUint8(offset++));
+        }
+        const valueType = view.getUint8(offset++); // expect 7 (string)
+        if (valueType !== 7) throw new Error('Unsupported header value type');
+        const valueLen = view.getUint16(offset, false); offset += 2;
+        let value = '';
+        for (let i = 0; i < valueLen; i++) {
+          value += String.fromCharCode(view.getUint8(offset++));
+        }
+        headers[name] = value;
+        headersConsumed += 1 + nameLen + 1 + 2 + valueLen;
+      }
+
+      const payload = new Uint8Array(arrayBuffer, 12 + headersLen, totalLen - headersLen - 16); // exclude prelude+CRC and message CRC
+      return { headers, payload };
+    }
+
+    // Check if microphone is available before trying to use it
+    async function checkMicrophoneAvailability() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(device => device.kind === 'audioinput');
+
+        if (audioInputs.length === 0) {
+          logDebug('No audio input devices found');
+          return false;
+        }
+
+        logDebug(`Found ${audioInputs.length} audio input devices`);
+        return true;
+      } catch (err) {
+        logDebug(`Error checking audio devices: ${err.message}`);
+        return false;
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Text to Speech (AWS Polly)</title>
+</head>
+<body>
+  <nav>
+    <a href="text-to-speech.html">Text To Speech - AWS Polly</a>
+    <a href="transcribe.html">Transcribe - AWS Transcribe</a>
+    <a href="claude.html">Response - Claude via AWS Bedrock</a>
+  </nav>
+  <h1>Text to Speech</h1>
+  <textarea id="text" rows="4" cols="50">Hello! This is a browser-based text to speech demo using AWS Polly.</textarea>
+  <br />
+  <button onclick="speak()">Speak</button>
+  <audio id="player" controls></audio>
+
+  <script>
+    async function speak() {
+      const text = document.getElementById("text").value;
+
+      const response = await fetch("/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      });
+
+      if (!response.ok) {
+        alert("Failed to synthesize speech.");
+        return;
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const player = document.getElementById("player");
+      player.src = audioUrl;
+      player.play();
+    }
+  </script>
+</body>
+</html>

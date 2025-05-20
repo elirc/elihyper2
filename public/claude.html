@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Claude via Bedrock</title>
+</head>
+<body>
+  <nav>
+    <a href="text-to-speech.html">Text To Speech - AWS Polly</a>
+    <a href="transcribe.html">Transcribe - AWS Transcribe</a>
+    <a href="claude.html">Response - Claude via AWS Bedrock</a>
+  </nav>
+  <h2>Ask Claude</h2>
+  <textarea id="input" rows="4" cols="60" placeholder="Type your question here..."></textarea><br>
+  <button onclick="askClaude()">Ask</button>
+  <p><strong>Claude:</strong> <span id="response"></span></p>
+
+  <script>
+    async function askClaude() {
+      const input = document.getElementById("input").value;
+      const responseBox = document.getElementById("response");
+
+      responseBox.textContent = "Thinking...";
+
+      const res = await fetch("/ask-claude", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: input })
+      });
+
+      const data = await res.json();
+      responseBox.textContent = data.completion || "Error.";
+    }
+  </script>
+</body>
+</html>
