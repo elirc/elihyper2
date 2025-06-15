@@ -75,7 +75,7 @@ app.get("/get-signed-url", async (req, res) => {
 })
 
 async function getSignedWebSocketUrl() {
-  
+
   console.log("Creating signed URL for region:", region);
 
   try {
@@ -193,12 +193,8 @@ app.post("/ask-claude", async (req, res) => {
     body: JSON.stringify({
       anthropic_version: 'bedrock-2023-05-31',
       max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: [{ type: 'text', text: req.body.prompt }]
-        }
-      ]
+      system: req.body.tone ?? '', // a smart, calm, and reliable assistant.
+      messages: JSON.parse(req.body.prompt ?? '')
     })
   };
 
