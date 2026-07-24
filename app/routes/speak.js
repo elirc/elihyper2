@@ -15,17 +15,12 @@ async function collect(stream) {
   return Buffer.concat(chunks);
 }
 
-// Turns "Hello! This is a demo." into "hello-this-is-a-demo".
-function filenameFrom(text) {
-  const slug = text
-    .replace(/<[^>]*>/g, ' ')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40)
-    .replace(/-+$/, '');
-  return `${slug || 'speech'}.mp3`;
-}
+// Shared with the browser rather than reimplemented here. The module is
+// dual-exported for exactly this reason: a filename sanitiser that exists in
+// two places will eventually only be fixed in one.
+const { filenameFrom } = require('../public/js/filename');
+
+const speechFilename = (text) => filenameFrom(text, 'mp3', { fallback: 'speech' });
 
 function createSpeakRouter({ polly, config, cache }) {
   const router = express.Router();
@@ -96,8 +91,8 @@ function createSpeakRouter({ polly, config, cache }) {
         'Cache-Control': 'public, max-age=86400',
         'X-Cache': cacheStatus,
         'Content-Disposition': body.download
-          ? `attachment; filename="${filenameFrom(text)}"`
-          : `inline; filename="${filenameFrom(text)}"`,
+          ? `attachment; filename="${speechFilename(text)}"`
+          : `inline; filename="${speechFilename(text)}"`,
       });
       return res.end(audio);
     };
@@ -130,4 +125,4 @@ function createSpeakRouter({ polly, config, cache }) {
   return { router, audioCache, voices };
 }
 
-module.exports = { createSpeakRouter, filenameFrom };
+module.exports = { createSpeakRouter, speechFilename };
