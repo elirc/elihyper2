@@ -19,6 +19,14 @@
       messages = [];
     }
 
+    // Replaces the in-memory history wholesale. Used when switching to a saved
+    // conversation, and by edit/regenerate, which are both just a truncated
+    // history followed by an ordinary send.
+    function load(next) {
+      abort();
+      messages = Array.isArray(next) ? next.map((m) => ({ ...m })) : [];
+    }
+
     function abort() {
       controller?.abort();
       controller = null;
@@ -147,7 +155,7 @@
       return { text: answer, stopReason };
     }
 
-    return { send, abort, reset, getMessages, isBusy: () => controller !== null };
+    return { send, abort, reset, load, getMessages, isBusy: () => controller !== null };
   }
 
   window.Chat = { createChat };
