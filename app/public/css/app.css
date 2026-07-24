@@ -1,0 +1,330 @@
+/* Shared shell for every page. Light and dark are both first-class; colours
+   come from custom properties so the dark variant is an override, not a
+   duplicated stylesheet. */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --surface-2: #f0f0f2;
+  --border: #d6d6db;
+  --text: #17171a;
+  --text-muted: #5c5c66;
+  --accent: #1f5fd6;          /* 5.9:1 on white */
+  --accent-text: #ffffff;
+  --accent-soft: #e8effc;
+  --danger: #b3261e;          /* 6.2:1 on white */
+  --success: #146c43;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 4%);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16161a;
+    --surface: #1e1e24;
+    --surface-2: #26262e;
+    --border: #3a3a45;
+    --text: #ececf0;
+    --text-muted: #a3a3b0;
+    --accent: #7aa7f5;        /* 7.1:1 on --surface */
+    --accent-text: #10131a;
+    --accent-soft: #23304a;
+    --danger: #f2857c;
+    --success: #6bcf9a;
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+
+h1 { font-size: 1.6rem; margin: 0 0 .25rem; letter-spacing: -0.01em; }
+h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+.lede { color: var(--text-muted); margin: 0 0 1.5rem; }
+
+/* ---- Navigation ---------------------------------------------------------- */
+
+.site-nav {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.site-nav ul {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  list-style: none;
+  display: flex;
+  gap: .25rem;
+  overflow-x: auto;
+}
+.site-nav a {
+  display: block;
+  padding: .85rem .7rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+.site-nav a:hover { color: var(--text); }
+.site-nav a[aria-current="page"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  padding: .6rem 1rem;
+  z-index: 20;
+}
+.skip-link:focus { left: .5rem; top: .5rem; }
+
+/* ---- Controls ------------------------------------------------------------ */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  box-shadow: var(--shadow);
+  margin-bottom: 1rem;
+}
+
+.field { margin-bottom: 1rem; }
+.field > label,
+.field-label {
+  display: block;
+  font-weight: 600;
+  font-size: .875rem;
+  margin-bottom: .35rem;
+}
+.hint { color: var(--text-muted); font-size: .8125rem; margin: .35rem 0 0; }
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem;
+  align-items: flex-end;
+}
+.row > .field { flex: 1 1 12rem; margin-bottom: 0; }
+
+input[type="text"], textarea, select {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .55rem .65rem;
+}
+textarea { resize: vertical; min-height: 5.5rem; }
+
+button {
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: .55rem 1rem;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { filter: brightness(1.08); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+
+button.secondary {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+button.danger { background: var(--danger); color: #fff; }
+
+/* A visible focus ring everywhere, including for mouse users on form fields. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.button-row { display: flex; flex-wrap: wrap; gap: .5rem; }
+
+/* ---- Status and messages ------------------------------------------------- */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  color: var(--text-muted);
+  font-size: .875rem;
+  min-height: 1.5rem;
+}
+.status::before {
+  content: "";
+  width: .6rem;
+  height: .6rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.status[data-state="listening"],
+.status[data-state="speaking"] { color: var(--success); }
+.status[data-state="thinking"],
+.status[data-state="connecting"],
+.status[data-state="reconnecting"] { color: var(--accent); }
+.status[data-state="error"] { color: var(--danger); }
+
+.alert {
+  border-radius: 8px;
+  padding: .7rem .85rem;
+  font-size: .9rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--text);
+}
+.alert:empty { display: none; }
+
+/* ---- Transcript and chat ------------------------------------------------- */
+
+.transcript {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  min-height: 12rem;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.turn { margin-bottom: 1rem; }
+.turn:last-child { margin-bottom: 0; }
+.turn .who {
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+  margin-bottom: .25rem;
+}
+.turn.user .bubble {
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  padding: .6rem .8rem;
+}
+.turn .bubble > :first-child { margin-top: 0; }
+.turn .bubble > :last-child { margin-bottom: 0; }
+
+.turn .bubble pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .75rem;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: .875rem;
+}
+.turn .bubble code {
+  font-family: var(--mono);
+  font-size: .9em;
+  background: var(--surface-2);
+  padding: .1em .3em;
+  border-radius: 4px;
+}
+.turn .bubble pre code { background: none; padding: 0; }
+.turn .bubble blockquote {
+  margin: .5rem 0;
+  padding-left: .8rem;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
+}
+
+.partial { color: var(--text-muted); font-style: italic; }
+.partial:empty { display: none; }
+
+.line { margin: 0 0 .35rem; }
+.line .ts { color: var(--text-muted); font-family: var(--mono); font-size: .8em; margin-right: .5rem; }
+.line.synthetic { color: var(--text-muted); font-style: italic; text-align: center; }
+
+.jump {
+  position: sticky;
+  bottom: .5rem;
+  display: block;
+  margin: .5rem auto 0;
+}
+.jump[hidden] { display: none; }
+
+/* ---- Push to talk -------------------------------------------------------- */
+
+.talk {
+  display: block;
+  width: 100%;
+  max-width: 22rem;
+  margin: 1rem auto;
+  padding: 1.5rem;
+  font-size: 1.05rem;
+  border-radius: 999px;
+  touch-action: none;
+  user-select: none;
+}
+.talk[data-active="true"] {
+  background: var(--danger);
+  color: #fff;
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--danger) 25%, transparent);
+}
+
+/* ---- Debug panel --------------------------------------------------------- */
+
+details.debug { margin-top: 1.5rem; }
+details.debug summary { cursor: pointer; color: var(--text-muted); font-size: .875rem; }
+details.debug pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .75rem;
+  max-height: 14rem;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: .75rem;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .page { padding: 1rem .75rem 3rem; }
+  .row > .field { flex-basis: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}

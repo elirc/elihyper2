@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Text to Speech — Nova</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <nav class="site-nav" data-nav aria-label="Primary"></nav>
+
+  <main class="page" id="main">
+    <h1>Text to Speech</h1>
+    <p class="lede">Amazon Polly. Pick a language, a voice, and an engine, then listen or download.</p>
+
+    <div class="alert" id="error" role="alert"></div>
+
+    <div class="card">
+      <div class="row">
+        <div class="field">
+          <label for="language">Language</label>
+          <select id="language"></select>
+        </div>
+        <div class="field">
+          <label for="voice">Voice</label>
+          <select id="voice"></select>
+        </div>
+        <div class="field">
+          <label for="engine">Engine</label>
+          <select id="engine"></select>
+          <p class="hint" id="engine-hint">Generative sounds the most natural and costs the most.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="field">
+        <span class="field-label" id="mode-label">Input format</span>
+        <div class="button-row" role="radiogroup" aria-labelledby="mode-label">
+          <label><input type="radio" name="textType" value="text" checked /> Plain text</label>
+          <label><input type="radio" name="textType" value="ssml" /> SSML</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="text">Text to speak</label>
+        <textarea id="text" rows="5">Hello! This is a browser-based text to speech demo using AWS Polly.</textarea>
+        <p class="hint">
+          <span id="count">0</span> / <span id="max">3000</span> characters
+        </p>
+      </div>
+
+      <div class="button-row">
+        <button id="speak" type="button">Speak</button>
+        <button id="download" type="button" class="secondary" disabled>Download MP3</button>
+        <span class="status" id="status" role="status" data-state="idle">Ready</span>
+      </div>
+
+      <audio id="player" controls style="width:100%;margin-top:1rem"></audio>
+    </div>
+
+    <details>
+      <summary>SSML quick reference</summary>
+      <div class="card" style="margin-top:.75rem">
+        <p class="hint">SSML must be wrapped in a single <code>&lt;speak&gt;</code> element.
+          Tag support varies by engine — the generative and neural engines accept a narrower
+          set than standard.</p>
+        <ul>
+          <li><code>&lt;break time="500ms"/&gt;</code> — pause</li>
+          <li><code>&lt;emphasis level="strong"&gt;word&lt;/emphasis&gt;</code> — stress a word</li>
+          <li><code>&lt;prosody rate="slow"&gt;text&lt;/prosody&gt;</code> — change speed or pitch</li>
+          <li><code>&lt;say-as interpret-as="digits"&gt;2024&lt;/say-as&gt;</code> — read character by character</li>
+        </ul>
+        <button id="ssml-example" type="button" class="secondary">Insert an example</button>
+      </div>
+    </details>
+  </main>
+
+  <script src="/js/nav.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const $ = (id) => document.getElementById(id);
+      const errorBox = $('error');
+      const status = $('status');
+      const languageSelect = $('language');
+      const voiceSelect = $('voice');
+      const engineSelect = $('engine');
+      const textArea = $('text');
+      const countEl = $('count');
+      const speakButton = $('speak');
+      const downloadButton = $('download');
+      const player = $('player');
+
+      const STORAGE_KEY = 'nova.tts';
+      let voices = [];
+      let maxCharacters = 3000;
+      let currentUrl = null;
+      let currentFilename = 'speech.mp3';
+
+      function textType() {
+        return document.querySelector('input[name="textType"]:checked').value;
+      }
+
+      function saved() {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) ?? {}; }
+        catch { return {}; }
+      }
+      function save() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            language: languageSelect.value,
+            voice: voiceSelect.value,
+            engine: engineSelect.value,
+          }));
+        } catch { /* private browsing */ }
+      }
+
+      function setStatus(state, message) {
+        status.dataset.state = state;
+        status.textContent = message;
+      }
+
+      // --- voice catalogue ------------------------------------------------
+
+      async function loadVoices() {
+        setStatus('connecting', 'Loading voices…');
+        const response = await fetch('/voices');
+        if (!response.ok) throw new Error('Could not load the voice list.');
+        const data = await response.json();
+
+        voices = data.voices;
+        maxCharacters = data.maxCharacters;
+        $('max').textContent = String(maxCharacters);
+
+        const languages = [...new Map(
+          voices.map((v) => [v.languageCode, v.languageName])
+        )].sort((a, b) => a[1].localeCompare(b[1]));
+
+        for (const [code, name] of languages) {
+          const option = document.createElement('option');
+          option.value = code;
+          option.textContent = `${name} (${code})`;
+          languageSelect.appendChild(option);
+        }
+
+        const preferences = saved();
+        const defaultVoice = voices.find((v) => v.id === data.defaults.voiceId);
+        languageSelect.value =
+          preferences.language && languages.some(([c]) => c === preferences.language)
+            ? preferences.language
+            : defaultVoice?.languageCode ?? languages[0][0];
+
+        renderVoices(preferences.voice ?? data.defaults.voiceId);
+        renderEngines(preferences.engine ?? data.defaults.engine);
+        setStatus('idle', 'Ready');
+      }
+
+      function renderVoices(preferredVoiceId) {
+        const forLanguage = voices.filter((v) => v.languageCode === languageSelect.value);
+        voiceSelect.innerHTML = '';
+        for (const voice of forLanguage) {
+          const option = document.createElement('option');
+          option.value = voice.id;
+          option.textContent = `${voice.name} (${voice.gender})`;
+          voiceSelect.appendChild(option);
+        }
+        if (preferredVoiceId && forLanguage.some((v) => v.id === preferredVoiceId)) {
+          voiceSelect.value = preferredVoiceId;
+        }
+      }
+
+      // Engines come from the selected voice's SupportedEngines, never a
+      // hardcoded list: not every voice runs on every engine.
+      function renderEngines(preferredEngine) {
+        const voice = voices.find((v) => v.id === voiceSelect.value);
+        const supported = voice?.supportedEngines ?? [];
+        const previous = preferredEngine ?? engineSelect.value;
+
+        engineSelect.innerHTML = '';
+        for (const engine of supported) {
+          const option = document.createElement('option');
+          option.value = engine;
+          option.textContent = engine;
+          engineSelect.appendChild(option);
+        }
+
+        // Auto-correct rather than erroring when the old engine is unavailable.
+        if (supported.includes(previous)) {
+          engineSelect.value = previous;
+        } else if (supported.length > 0) {
+          engineSelect.value = supported[0];
+          $('engine-hint').textContent =
+            `${voice.name} does not support "${previous}" — switched to "${supported[0]}".`;
+        }
+      }
+
+      languageSelect.addEventListener('change', () => {
+        renderVoices();
+        renderEngines();
+        save();
+      });
+      voiceSelect.addEventListener('change', () => { renderEngines(); save(); });
+      engineSelect.addEventListener('change', save);
+
+      // --- character counting ---------------------------------------------
+
+      function updateCount() {
+        const length = textArea.value.length;
+        countEl.textContent = String(length);
+        const over = length > maxCharacters;
+        countEl.style.color = over ? 'var(--danger)' : '';
+        speakButton.disabled = over || textArea.value.trim() === '';
+      }
+      textArea.addEventListener('input', updateCount);
+
+      // --- synthesis -------------------------------------------------------
+
+      function filenameFrom(text) {
+        const slug = text
+          .replace(/<[^>]*>/g, ' ')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 40)
+          .replace(/-+$/, '');
+        return `${slug || 'speech'}.mp3`;
+      }
+
+      async function speak() {
+        errorBox.textContent = '';
+        speakButton.disabled = true;
+        setStatus('thinking', 'Synthesising…');
+
+        try {
+          const response = await fetch('/speak', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: textArea.value,
+              voiceId: voiceSelect.value,
+              engine: engineSelect.value,
+              textType: textType(),
+            }),
+          });
+
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || `Synthesis failed (${response.status})`);
+          }
+
+          // Release the previous blob URL or every click leaks one.
+          if (currentUrl) URL.revokeObjectURL(currentUrl);
+          currentUrl = URL.createObjectURL(await response.blob());
+          currentFilename = filenameFrom(textArea.value);
+
+          player.src = currentUrl;
+          player.play().catch(() => { /* autoplay policy; controls still work */ });
+          downloadButton.disabled = false;
+
+          const cached = response.headers.get('X-Cache') === 'HIT';
+          setStatus('idle', cached ? 'Ready (served from cache)' : 'Ready');
+        } catch (err) {
+          errorBox.textContent = err.message;
+          setStatus('error', 'Failed');
+        } finally {
+          updateCount();
+        }
+      }
+
+      speakButton.addEventListener('click', speak);
+
+      downloadButton.addEventListener('click', () => {
+        if (!currentUrl) return;
+        const link = document.createElement('a');
+        link.href = currentUrl;
+        link.download = currentFilename;
+        link.click();
+      });
+
+      $('ssml-example').addEventListener('click', () => {
+        document.querySelector('input[value="ssml"]').checked = true;
+        textArea.value =
+          '<speak>Here is a pause.<break time="700ms"/> ' +
+          'And here is something <emphasis level="strong">important</emphasis>. ' +
+          '<prosody rate="slow">This part is slower.</prosody></speak>';
+        updateCount();
+      });
+
+      updateCount();
+      loadVoices().catch((err) => {
+        errorBox.textContent = err.message;
+        setStatus('error', 'Failed');
+      });
+    })();
+  </script>
+</body>
+</html>

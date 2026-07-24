@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ask Claude — Nova</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <nav class="site-nav" data-nav aria-label="Primary"></nav>
+
+  <main class="page" id="main">
+    <h1>Ask Claude</h1>
+    <p class="lede">Multi-turn chat with Claude on Amazon Bedrock, streamed as it is generated.</p>
+
+    <div class="alert" id="error" role="alert"></div>
+
+    <div class="card">
+      <div class="row">
+        <div class="field">
+          <label for="preset">Response style</label>
+          <select id="preset"></select>
+          <p class="hint" id="preset-hint"></p>
+        </div>
+      </div>
+      <div class="field" id="custom-field" hidden>
+        <label for="custom-prompt">Custom system prompt</label>
+        <textarea id="custom-prompt" rows="3"
+          placeholder="You are a…"></textarea>
+        <p class="hint"><span id="custom-count">0</span> / <span id="custom-max"></span> characters</p>
+      </div>
+    </div>
+
+    <h2 id="transcript-heading">Conversation</h2>
+    <div class="transcript" id="transcript" role="log" aria-live="polite"
+         aria-labelledby="transcript-heading" tabindex="0">
+      <p class="hint" id="empty-state">Nothing yet. Ask a question below.</p>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <div class="field">
+        <label for="input">Your message</label>
+        <textarea id="input" rows="3" placeholder="Ask anything…"></textarea>
+        <p class="hint">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send.</p>
+      </div>
+      <div class="button-row">
+        <button id="send" type="button">Ask</button>
+        <button id="stop" type="button" class="secondary" hidden>Stop</button>
+        <button id="reset" type="button" class="secondary">New conversation</button>
+        <span class="status" id="status" role="status" data-state="idle">Ready</span>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/nav.js"></script>
+  <script src="/js/markdown.js"></script>
+  <script src="/js/presets.js"></script>
+  <script src="/js/chat.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const $ = (id) => document.getElementById(id);
+      const transcript = $('transcript');
+      const errorBox = $('error');
+      const status = $('status');
+      const input = $('input');
+      const sendButton = $('send');
+      const stopButton = $('stop');
+      const resetButton = $('reset');
+      const presetSelect = $('preset');
+      const presetHint = $('preset-hint');
+      const customField = $('custom-field');
+      const customPrompt = $('custom-prompt');
+      const customCount = $('custom-count');
+
+      let selection = window.Presets.loadSelection();
+      let currentAnswerEl = null;
+      let autoScroll = true;
+
+      $('custom-max').textContent = String(window.Presets.MAX_CUSTOM_LENGTH);
+
+      // --- presets -------------------------------------------------------
+
+      for (const preset of window.Presets.PRESETS) {
+        const option = document.createElement('option');
+        option.value = preset.id;
+        option.textContent = preset.label;
+        presetSelect.appendChild(option);
+      }
+      presetSelect.value = selection.id;
+      customPrompt.value = selection.customPrompt;
+
+      function syncPreset() {
+        const preset = window.Presets.byId(presetSelect.value);
+        presetHint.textContent = preset ? preset.description : '';
+        customField.hidden = !preset?.custom;
+        customCount.textContent = String(customPrompt.value.length);
+      }
+
+      presetSelect.addEventListener('change', () => {
+        selection = { id: presetSelect.value, customPrompt: customPrompt.value };
+        window.Presets.saveSelection(selection);
+        syncPreset();
+      });
+
+      customPrompt.addEventListener('input', () => {
+        customCount.textContent = String(customPrompt.value.length);
+        selection = { id: presetSelect.value, customPrompt: customPrompt.value };
+        window.Presets.saveSelection(selection);
+      });
+
+      syncPreset();
+
+      // --- transcript ----------------------------------------------------
+
+      transcript.addEventListener('scroll', () => {
+        const atBottom =
+          transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
+        autoScroll = atBottom;
+      });
+
+      function scroll() {
+        if (autoScroll) transcript.scrollTop = transcript.scrollHeight;
+      }
+
+      function addTurn(who, label) {
+        $('empty-state')?.remove();
+        const turn = document.createElement('div');
+        turn.className = `turn ${who}`;
+
+        const heading = document.createElement('div');
+        heading.className = 'who';
+        heading.textContent = label;
+
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+
+        turn.append(heading, bubble);
+        transcript.appendChild(turn);
+        scroll();
+        return { turn, bubble };
+      }
+
+      function addCopyButton(turn, getText) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'secondary';
+        button.style.marginTop = '.5rem';
+        button.textContent = 'Copy';
+        button.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(getText());
+            button.textContent = 'Copied';
+          } catch {
+            button.textContent = 'Press Ctrl+C';
+          }
+          setTimeout(() => { button.textContent = 'Copy'; }, 1500);
+        });
+        turn.appendChild(button);
+      }
+
+      // --- chat ----------------------------------------------------------
+
+      function setBusy(busy) {
+        sendButton.disabled = busy;
+        sendButton.textContent = busy ? 'Thinking…' : 'Ask';
+        stopButton.hidden = !busy;
+        resetButton.disabled = busy;
+        status.dataset.state = busy ? 'thinking' : 'idle';
+        status.textContent = busy ? 'Generating…' : 'Ready';
+      }
+
+      const chat = window.Chat.createChat({
+        onDelta(_delta, full) {
+          if (currentAnswerEl) {
+            currentAnswerEl.innerHTML = window.Markdown.render(full);
+            scroll();
+          }
+        },
+      });
+
+      async function send() {
+        const text = input.value.trim();
+        errorBox.textContent = '';
+        if (!text) {
+          errorBox.textContent = 'Please type a message first.';
+          input.focus();
+          return;
+        }
+
+        const preset = window.Presets.byId(presetSelect.value);
+        if (preset?.custom && customPrompt.value.length > window.Presets.MAX_CUSTOM_LENGTH) {
+          errorBox.textContent =
+            `Custom system prompt must be ${window.Presets.MAX_CUSTOM_LENGTH} characters or fewer.`;
+          return;
+        }
+
+        const user = addTurn('user', 'You');
+        user.bubble.textContent = text;
+        addCopyButton(user.turn, () => text);
+
+        input.value = '';
+        setBusy(true);
+
+        const answer = addTurn('assistant', 'Claude');
+        currentAnswerEl = answer.bubble;
+        currentAnswerEl.innerHTML = '<p class="hint">…</p>';
+
+        try {
+          const result = await chat.send(text, {
+            tone: window.Presets.resolvePrompt({
+              id: presetSelect.value,
+              customPrompt: customPrompt.value,
+            }),
+          });
+          if (!result.text) {
+            currentAnswerEl.innerHTML = '<p class="hint">No response.</p>';
+          } else {
+            addCopyButton(answer.turn, () => result.text);
+          }
+        } catch (err) {
+          errorBox.textContent = err.message;
+          if (!currentAnswerEl.textContent.trim() || currentAnswerEl.querySelector('.hint')) {
+            answer.turn.remove();
+          }
+        } finally {
+          currentAnswerEl = null;
+          setBusy(false);
+          input.focus();
+        }
+      }
+
+      sendButton.addEventListener('click', send);
+      stopButton.addEventListener('click', () => chat.abort());
+      resetButton.addEventListener('click', () => {
+        chat.reset();
+        transcript.innerHTML = '<p class="hint" id="empty-state">Nothing yet. Ask a question below.</p>';
+        errorBox.textContent = '';
+        input.focus();
+      });
+
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault();
+          send();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

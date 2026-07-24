@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live Transcription — Nova</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <nav class="site-nav" data-nav aria-label="Primary"></nav>
+
+  <main class="page" id="main">
+    <h1>Live Transcription</h1>
+    <p class="lede">Your microphone streams straight to Amazon Transcribe over a signed WebSocket.</p>
+
+    <div class="alert" id="error" role="alert"></div>
+    <div class="alert" id="restored" role="status" hidden></div>
+
+    <div class="card">
+      <div class="row">
+        <div class="field">
+          <label for="mic">Microphone</label>
+          <select id="mic"></select>
+        </div>
+        <div class="field">
+          <label for="language">Language</label>
+          <select id="language"></select>
+        </div>
+      </div>
+      <div class="button-row" style="margin-top:1rem">
+        <button id="start" type="button">Start transcription</button>
+        <button id="stop" type="button" class="secondary" disabled>Stop</button>
+        <span class="status" id="status" role="status" data-state="idle">Ready</span>
+      </div>
+      <p class="hint">
+        <label><input type="checkbox" id="timestamps" /> Include timestamps</label>
+      </p>
+    </div>
+
+    <h2 id="transcript-heading">Transcript</h2>
+    <div class="transcript" id="transcript" tabindex="0" aria-labelledby="transcript-heading">
+      <div id="finals" role="log" aria-live="polite"></div>
+      <!-- Partials update on every syllable, so this is deliberately NOT a
+           live region: announcing it would flood a screen reader. -->
+      <p class="partial" id="partial" aria-hidden="true"></p>
+    </div>
+    <button id="jump" type="button" class="secondary jump" hidden>Jump to latest</button>
+
+    <div class="button-row" style="margin-top:1rem">
+      <button id="copy" type="button" class="secondary" disabled>Copy transcript</button>
+      <button id="download" type="button" class="secondary" disabled>Download .txt</button>
+      <button id="clear" type="button" class="secondary" disabled>Clear</button>
+    </div>
+
+    <details class="debug">
+      <summary>Debug log</summary>
+      <pre id="debug"></pre>
+    </details>
+  </main>
+
+  <script src="/js/nav.js"></script>
+  <script src="/js/audio-utils.js"></script>
+  <script src="/js/transcriber.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const $ = (id) => document.getElementById(id);
+      const errorBox = $('error');
+      const restoredBox = $('restored');
+      const status = $('status');
+      const micSelect = $('mic');
+      const languageSelect = $('language');
+      const finals = $('finals');
+      const partial = $('partial');
+      const transcript = $('transcript');
+      const debugPre = $('debug');
+      const jumpButton = $('jump');
+      const startButton = $('start');
+      const stopButton = $('stop');
+      const timestampsToggle = $('timestamps');
+
+      const STORAGE_KEY = 'nova.transcript';
+      let lines = [];
+      let sessionStart = null;
+      let autoScroll = true;
+
+      // --- persistence -----------------------------------------------------
+      // sessionStorage, not localStorage: speech may be sensitive and should
+      // not outlive the tab.
+
+      function persist() {
+        try {
+          sessionStorage.setItem(STORAGE_KEY, JSON.stringify(lines));
+        } catch (err) {
+          if (err.name === 'QuotaExceededError') {
+            lines = lines.slice(Math.floor(lines.length / 2));
+            try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(lines)); } catch { /* give up */ }
+            debug('Transcript storage full — dropped the oldest half.');
+          }
+        }
+      }
+
+      function restore() {
+        try {
+          const raw = sessionStorage.getItem(STORAGE_KEY);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed) || parsed.length === 0) return;
+          lines = parsed;
+          for (const line of lines) renderLine(line, false);
+          restoredBox.hidden = false;
+          restoredBox.textContent = 'Restored the transcript from earlier in this session.';
+          updateButtons();
+        } catch { /* corrupt payload; start fresh */ }
+      }
+
+      // --- rendering -------------------------------------------------------
+
+      function debug(message) {
+        debugPre.textContent += `${message}\n`;
+        debugPre.scrollTop = debugPre.scrollHeight;
+      }
+
+      function elapsed(atMs) {
+        const seconds = Math.max(0, Math.round(atMs / 1000));
+        const hh = String(Math.floor(seconds / 3600)).padStart(2, '0');
+        const mm = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+        const ss = String(seconds % 60).padStart(2, '0');
+        return `${hh}:${mm}:${ss}`;
+      }
+
+      function renderLine(line, scroll = true) {
+        const p = document.createElement('p');
+        p.className = line.synthetic ? 'line synthetic' : 'line';
+        if (!line.synthetic) {
+          const ts = document.createElement('span');
+          ts.className = 'ts';
+          ts.textContent = elapsed(line.at);
+          ts.hidden = !timestampsToggle.checked;
+          p.appendChild(ts);
+        }
+        p.appendChild(document.createTextNode(line.text));
+        finals.appendChild(p);
+        if (scroll) maybeScroll();
+      }
+
+      function maybeScroll() {
+        if (autoScroll) {
+          transcript.scrollTop = transcript.scrollHeight;
+          jumpButton.hidden = true;
+        } else {
+          jumpButton.hidden = false;
+        }
+      }
+
+      transcript.addEventListener('scroll', () => {
+        autoScroll =
+          transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
+        if (autoScroll) jumpButton.hidden = true;
+      });
+
+      jumpButton.addEventListener('click', () => {
+        autoScroll = true;
+        transcript.scrollTop = transcript.scrollHeight;
+        jumpButton.hidden = true;
+      });
+
+      timestampsToggle.addEventListener('change', () => {
+        finals.querySelectorAll('.ts').forEach((el) => { el.hidden = !timestampsToggle.checked; });
+      });
+
+      function updateButtons() {
+        const has = lines.some((l) => !l.synthetic);
+        $('copy').disabled = !has;
+        $('download').disabled = !has;
+        $('clear').disabled = lines.length === 0;
+      }
+
+      function transcriptText() {
+        return lines
+          .filter((l) => !l.synthetic)
+          .map((l) => (timestampsToggle.checked ? `[${elapsed(l.at)}] ${l.text}` : l.text))
+          .join('\n');
+      }
+
+      // --- options ---------------------------------------------------------
+
+      async function loadOptions() {
+        const response = await fetch('/transcribe-options');
+        const data = await response.json();
+        for (const code of data.languages) {
+          const option = document.createElement('option');
+          option.value = code;
+          option.textContent = code;
+          languageSelect.appendChild(option);
+        }
+        languageSelect.value = data.defaultLanguage;
+      }
+
+      async function loadMicrophones() {
+        const result = await window.Transcriber.listMicrophones();
+        micSelect.innerHTML = '';
+        if (!result.granted) {
+          const option = document.createElement('option');
+          option.textContent = 'Microphone access denied';
+          micSelect.appendChild(option);
+          micSelect.disabled = true;
+          errorBox.textContent =
+            'Microphone access was denied. Allow it in your browser settings, then reload.';
+          return;
+        }
+        for (const device of result.devices) {
+          const option = document.createElement('option');
+          option.value = device.id;
+          option.textContent = device.label;
+          micSelect.appendChild(option);
+        }
+        debug(`Found ${result.devices.length} audio input device(s).`);
+      }
+
+      // --- transcription ---------------------------------------------------
+
+      const STATUS_TEXT = {
+        idle: 'Ready',
+        connecting: 'Connecting to AWS Transcribe…',
+        listening: 'Transcribing — speak now',
+        error: 'Stopped',
+      };
+
+      const transcriber = window.Transcriber.createTranscriber({
+        onPartial(text) {
+          // Each partial is the whole current utterance, so replace it.
+          partial.textContent = text;
+          maybeScroll();
+        },
+        onFinal(text, result) {
+          partial.textContent = '';
+          const line = {
+            text,
+            at: sessionStart ? Date.now() - sessionStart : 0,
+            synthetic: Boolean(result?.synthetic),
+          };
+          lines.push(line);
+          renderLine(line);
+          persist();
+          updateButtons();
+        },
+        onStateChange(state, detail) {
+          status.dataset.state = state;
+          if (state === 'reconnecting') {
+            status.textContent = `Reconnecting (attempt ${detail.attempt} of ${detail.of})…`;
+          } else {
+            status.textContent = STATUS_TEXT[state] ?? state;
+          }
+          startButton.disabled = state === 'connecting' || state === 'listening' || state === 'reconnecting';
+          stopButton.disabled = !startButton.disabled;
+          languageSelect.disabled = startButton.disabled;
+          micSelect.disabled = startButton.disabled;
+        },
+        onDebug: debug,
+        onError(err) { errorBox.textContent = err.message; },
+      });
+
+      startButton.addEventListener('click', async () => {
+        errorBox.textContent = '';
+        restoredBox.hidden = true;
+        sessionStart = Date.now();
+        try {
+          await transcriber.start({
+            deviceId: micSelect.value || undefined,
+            languageCode: languageSelect.value,
+          });
+        } catch (err) {
+          errorBox.textContent = err.message;
+        }
+      });
+
+      stopButton.addEventListener('click', () => {
+        transcriber.stop();
+        partial.textContent = '';
+      });
+
+      // --- export ----------------------------------------------------------
+
+      $('copy').addEventListener('click', async () => {
+        const button = $('copy');
+        try {
+          // Requires a secure context: works on localhost and HTTPS only.
+          await navigator.clipboard.writeText(transcriptText());
+          button.textContent = 'Copied';
+        } catch {
+          const range = document.createRange();
+          range.selectNodeContents(finals);
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          button.textContent = 'Press Ctrl+C';
+        }
+        setTimeout(() => { button.textContent = 'Copy transcript'; }, 1500);
+      });
+
+      $('download').addEventListener('click', () => {
+        const blob = new Blob([transcriptText()], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `transcript-${stamp}.txt`;
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+
+      $('clear').addEventListener('click', () => {
+        if (lines.length > 0 && !window.confirm('Clear the transcript? This cannot be undone.')) {
+          return;
+        }
+        lines = [];
+        finals.innerHTML = '';
+        partial.textContent = '';
+        restoredBox.hidden = true;
+        sessionStorage.removeItem(STORAGE_KEY);
+        updateButtons();
+      });
+
+      // --- init ------------------------------------------------------------
+
+      restore();
+      updateButtons();
+      loadOptions().catch(() => { errorBox.textContent = 'Could not load language options.'; });
+      loadMicrophones().catch((err) => { errorBox.textContent = err.message; });
+    })();
+  </script>
+</body>
+</html>

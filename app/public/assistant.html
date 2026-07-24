@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Voice Assistant — Nova</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <nav class="site-nav" data-nav aria-label="Primary"></nav>
+
+  <main class="page" id="main">
+    <h1>Voice Assistant</h1>
+    <p class="lede">
+      Hold the button and speak. Transcribe turns it into text, Claude answers, and Polly
+      reads the answer back. Everything is shown as text too, so it works with audio muted.
+    </p>
+
+    <div class="alert" id="error" role="alert"></div>
+
+    <div class="card">
+      <div class="row">
+        <div class="field">
+          <label for="language">Your language</label>
+          <select id="language"></select>
+        </div>
+        <div class="field">
+          <label for="voice">Assistant voice</label>
+          <select id="voice"></select>
+        </div>
+        <div class="field">
+          <span class="field-label" id="audio-label">Audio</span>
+          <div class="button-row" role="group" aria-labelledby="audio-label">
+            <label><input type="checkbox" id="mute" /> Mute the spoken reply</label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button id="talk" class="talk" type="button" data-active="false"
+            aria-describedby="talk-hint">
+      Hold to talk
+    </button>
+    <p class="hint" id="talk-hint" style="text-align:center">
+      Hold the button, or hold <kbd>Space</kbd>. Press again while the assistant is
+      speaking to interrupt it.
+    </p>
+
+    <p style="text-align:center">
+      <span class="status" id="status" role="status" data-state="idle">Idle</span>
+    </p>
+
+    <h2 id="transcript-heading">Conversation</h2>
+    <div class="transcript" id="transcript" role="log" aria-live="polite"
+         aria-labelledby="transcript-heading" tabindex="0">
+      <p class="hint" id="empty-state">Nothing yet. Hold the button and say hello.</p>
+    </div>
+    <p class="partial" id="partial" aria-hidden="true"></p>
+
+    <div class="button-row" style="margin-top:1rem">
+      <button id="reset" type="button" class="secondary">New conversation</button>
+    </div>
+
+    <details class="debug">
+      <summary>Debug log</summary>
+      <pre id="debug"></pre>
+    </details>
+  </main>
+
+  <script src="/js/nav.js"></script>
+  <script src="/js/markdown.js"></script>
+  <script src="/js/presets.js"></script>
+  <script src="/js/audio-utils.js"></script>
+  <script src="/js/transcriber.js"></script>
+  <script src="/js/chat.js"></script>
+  <script src="/js/speaker.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const $ = (id) => document.getElementById(id);
+      const talkButton = $('talk');
+      const status = $('status');
+      const errorBox = $('error');
+      const transcript = $('transcript');
+      const partial = $('partial');
+      const debugPre = $('debug');
+      const languageSelect = $('language');
+      const voiceSelect = $('voice');
+      const muteToggle = $('mute');
+
+      // An explicit state machine. Ad-hoc booleans produce impossible states -
+      // for example both listening and speaking after a fast barge-in.
+      //
+      //   idle ─hold─▶ listening ─release─▶ thinking ─first sentence─▶ speaking
+      //     ▲              │                   │                          │
+      //     └──────────────┴─── error ─────────┴──── done / barge-in ─────┘
+      const STATES = {
+        idle: 'Idle',
+        listening: 'Listening…',
+        thinking: 'Thinking…',
+        speaking: 'Speaking…',
+        error: 'Something went wrong',
+      };
+      let state = 'idle';
+      let utterance = [];
+      let flushTimer = null;
+      let currentAnswer = null;
+
+      function setState(next) {
+        state = next;
+        status.dataset.state = next;
+        status.textContent = STATES[next] ?? next;
+        talkButton.dataset.active = String(next === 'listening');
+        talkButton.textContent = next === 'listening' ? 'Listening — release to send' : 'Hold to talk';
+        talkButton.setAttribute('aria-pressed', String(next === 'listening'));
+      }
+
+      function debug(message) {
+        debugPre.textContent += `${message}\n`;
+        debugPre.scrollTop = debugPre.scrollHeight;
+      }
+
+      function fail(message) {
+        errorBox.textContent = message;
+        setState('idle');
+      }
+
+      // --- transcript rendering -------------------------------------------
+
+      function addTurn(who, label) {
+        $('empty-state')?.remove();
+        const turn = document.createElement('div');
+        turn.className = `turn ${who}`;
+        const heading = document.createElement('div');
+        heading.className = 'who';
+        heading.textContent = label;
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        turn.append(heading, bubble);
+        transcript.appendChild(turn);
+        transcript.scrollTop = transcript.scrollHeight;
+        return bubble;
+      }
+
+      // --- speech output ---------------------------------------------------
+
+      const speaker = window.Speaker.createSpeaker({
+        onStateChange(speakerState) {
+          if (speakerState === 'speaking' && state === 'thinking') setState('speaking');
+          if (speakerState === 'idle' && state === 'speaking') setState('idle');
+        },
+        onError(err) { debug(`Speech error: ${err.message}`); },
+      });
+
+      muteToggle.addEventListener('change', () => {
+        speaker.setMuted(muteToggle.checked);
+        if (muteToggle.checked && state === 'speaking') setState('idle');
+      });
+
+      // --- chat ------------------------------------------------------------
+
+      const chat = window.Chat.createChat({
+        onDelta(_delta, full) {
+          if (currentAnswer) {
+            currentAnswer.innerHTML = window.Markdown.render(full);
+            transcript.scrollTop = transcript.scrollHeight;
+          }
+        },
+        onSentence(sentence) {
+          // Synthesis starts per sentence, so playback begins long before the
+          // full answer has arrived.
+          speaker.enqueue(sentence);
+        },
+      });
+
+      async function ask(text) {
+        setState('thinking');
+        currentAnswer = addTurn('assistant', 'Claude');
+        currentAnswer.innerHTML = '<p class="hint">…</p>';
+
+        try {
+          const result = await chat.send(text, {
+            // Answers are going to be read aloud, so ask for prose written
+            // for the ear rather than markdown for the eye.
+            tone: window.Presets.byId('voice').systemPrompt,
+          });
+          if (!result.text) currentAnswer.innerHTML = '<p class="hint">No response.</p>';
+        } catch (err) {
+          fail(err.message);
+          return;
+        } finally {
+          currentAnswer = null;
+        }
+
+        // If nothing is queued to speak, we are already done.
+        if (!speaker.isSpeaking()) setState('idle');
+      }
+
+      // --- speech input ----------------------------------------------------
+
+      const transcriber = window.Transcriber.createTranscriber({
+        onPartial(text) { partial.textContent = text; },
+        onFinal(text, result) {
+          if (result?.synthetic) return;
+          partial.textContent = '';
+          utterance.push(text);
+        },
+        onStateChange(transcriberState, detail) {
+          if (transcriberState === 'reconnecting') {
+            status.textContent = `Reconnecting (attempt ${detail.attempt} of ${detail.of})…`;
+          }
+        },
+        onDebug: debug,
+        onError(err) { fail(err.message); },
+      });
+
+      async function startListening() {
+        if (state === 'listening' || state === 'thinking') return;
+
+        // Barge-in: stop playback and abort synthesis already in flight, or a
+        // request that resolves a moment later will start talking over you.
+        if (state === 'speaking') {
+          speaker.stop();
+          chat.abort();
+        }
+
+        errorBox.textContent = '';
+        clearTimeout(flushTimer);
+        utterance = [];
+
+        try {
+          setState('listening');
+          await transcriber.start({ languageCode: languageSelect.value });
+        } catch (err) {
+          fail(err.message);
+        }
+      }
+
+      function stopListening() {
+        if (state !== 'listening') return;
+        transcriber.stop();
+        setState('thinking');
+
+        // Transcribe finalises the tail of the utterance after the
+        // end-of-stream frame, so give those last results a moment to land.
+        flushTimer = setTimeout(() => {
+          const text = utterance.join(' ').trim();
+          utterance = [];
+          partial.textContent = '';
+
+          if (!text) {
+            setState('idle');
+            errorBox.textContent = 'I did not catch that — try holding the button a little longer.';
+            return;
+          }
+
+          addTurn('user', 'You').textContent = text;
+          ask(text);
+        }, 900);
+      }
+
+      talkButton.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        talkButton.setPointerCapture(event.pointerId);
+        startListening();
+      });
+      talkButton.addEventListener('pointerup', stopListening);
+      talkButton.addEventListener('pointercancel', stopListening);
+
+      // Keyboard equivalent. Ignore auto-repeat or every repeat restarts it.
+      talkButton.addEventListener('keydown', (event) => {
+        if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
+          event.preventDefault();
+          startListening();
+        }
+      });
+      talkButton.addEventListener('keyup', (event) => {
+        if (event.key === ' ' || event.key === 'Enter') {
+          event.preventDefault();
+          stopListening();
+        }
+      });
+
+      $('reset').addEventListener('click', () => {
+        chat.reset();
+        speaker.stop();
+        transcript.innerHTML = '<p class="hint" id="empty-state">Nothing yet. Hold the button and say hello.</p>';
+        errorBox.textContent = '';
+        setState('idle');
+      });
+
+      // --- init ------------------------------------------------------------
+
+      async function init() {
+        const [options, voiceData] = await Promise.all([
+          fetch('/transcribe-options').then((r) => r.json()),
+          fetch('/voices').then((r) => r.json()),
+        ]);
+
+        for (const code of options.languages) {
+          const option = document.createElement('option');
+          option.value = code;
+          option.textContent = code;
+          languageSelect.appendChild(option);
+        }
+        languageSelect.value = options.defaultLanguage;
+
+        const defaultVoice = voiceData.voices.find((v) => v.id === voiceData.defaults.voiceId);
+        const language = defaultVoice?.languageCode ?? 'en-US';
+        for (const voice of voiceData.voices.filter((v) => v.languageCode === language)) {
+          const option = document.createElement('option');
+          option.value = voice.id;
+          option.textContent = `${voice.name} (${voice.gender})`;
+          voiceSelect.appendChild(option);
+        }
+        voiceSelect.value = voiceData.defaults.voiceId;
+
+        const applyVoice = () => {
+          const voice = voiceData.voices.find((v) => v.id === voiceSelect.value);
+          const engine = voice?.supportedEngines.includes(voiceData.defaults.engine)
+            ? voiceData.defaults.engine
+            : voice?.supportedEngines[0];
+          speaker.setVoice(voiceSelect.value, engine);
+        };
+        voiceSelect.addEventListener('change', applyVoice);
+        applyVoice();
+
+        setState('idle');
+      }
+
+      init().catch((err) => {
+        errorBox.textContent = `Could not load settings: ${err.message}`;
+      });
+    })();
+  </script>
+</body>
+</html>
