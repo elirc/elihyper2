@@ -1,5 +1,7 @@
 # Nova — v2
 
+[![CI](https://github.com/hypernovaUSA/3build-nova/actions/workflows/ci.yml/badge.svg)](https://github.com/hypernovaUSA/3build-nova/actions/workflows/ci.yml)
+
 The active application. Voice assistant plus three AWS AI demos: Amazon Polly
 (speech synthesis), Amazon Transcribe (live speech to text), and Claude on
 Amazon Bedrock.
