@@ -71,6 +71,7 @@
   <script src="/js/nav.js"></script>
   <script src="/js/markdown.js"></script>
   <script src="/js/presets.js"></script>
+  <script src="/js/conversations.js"></script>
   <script src="/js/audio-utils.js"></script>
   <script src="/js/transcriber.js"></script>
   <script src="/js/chat.js"></script>
@@ -175,6 +176,23 @@
         },
       });
 
+      // The same store the Ask Claude page reads, so a conversation started by
+      // voice can be continued by typing over there.
+      const store = window.Conversations.createConversationStore({
+        storage: window.localStorage,
+      });
+      let activeConversationId = null;
+
+      function persist(firstUserMessage) {
+        const messages = chat.getMessages();
+        if (messages.length === 0) return;
+        if (activeConversationId === null) {
+          activeConversationId = store.create(firstUserMessage, messages).id;
+        } else {
+          store.save(activeConversationId, messages);
+        }
+      }
+
       async function ask(text) {
         setState('thinking');
         currentAnswer = addTurn('assistant', 'Claude');
@@ -192,6 +210,7 @@
           return;
         } finally {
           currentAnswer = null;
+          persist(text);
         }
 
         // If nothing is queued to speak, we are already done.
@@ -285,6 +304,7 @@
 
       $('reset').addEventListener('click', () => {
         chat.reset();
+        activeConversationId = null;
         speaker.stop();
         transcript.innerHTML = '<p class="hint" id="empty-state">Nothing yet. Hold the button and say hello.</p>';
         errorBox.textContent = '';
