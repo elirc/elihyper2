@@ -19,6 +19,11 @@
     <div class="with-sidebar">
     <aside class="sidebar" aria-labelledby="saved-heading">
       <h2 id="saved-heading">Saved conversations</h2>
+      <div class="button-row" style="margin-bottom:.6rem">
+        <button id="import" type="button" class="secondary">Import…</button>
+        <input type="file" id="import-file" accept="application/json,.json"
+               class="visually-hidden" aria-label="Choose a conversation JSON file" />
+      </div>
       <ul class="conversation-list" id="conversation-list"></ul>
       <p class="sidebar-empty" id="sidebar-empty">Nothing saved yet.</p>
     </aside>
@@ -56,6 +61,9 @@
         <button id="send" type="button">Ask</button>
         <button id="stop" type="button" class="secondary" hidden>Stop</button>
         <button id="reset" type="button" class="secondary">New conversation</button>
+        <button id="export-md" type="button" class="secondary" disabled>Export .md</button>
+        <button id="export-json" type="button" class="secondary" disabled>Export .json</button>
+        <button id="copy-all" type="button" class="secondary" disabled>Copy all</button>
         <span class="status" id="status" role="status" data-state="idle">Ready</span>
       </div>
     </div>
@@ -66,6 +74,7 @@
   <script src="/js/nav.js"></script>
   <script src="/js/markdown.js"></script>
   <script src="/js/presets.js"></script>
+  <script src="/js/filename.js"></script>
   <script src="/js/conversations.js"></script>
   <script src="/js/chat.js"></script>
   <script>
@@ -297,6 +306,7 @@
         chat.load(conversation.messages);
         renderTranscript(conversation.messages);
         renderSidebar();
+        updateExportButtons();
         errorBox.textContent = '';
         input.focus();
       }
@@ -306,6 +316,7 @@
         activeId = null;
         renderTranscript([]);
         renderSidebar();
+        updateExportButtons();
         errorBox.textContent = '';
       }
 
@@ -321,6 +332,7 @@
           store.save(activeId, messages);
         }
         renderSidebar();
+        updateExportButtons();
       }
 
       async function send() {
@@ -392,7 +404,103 @@
         }
       });
 
+      // --- export / import ------------------------------------------------
+
+      function currentConversation() {
+        const messages = chat.getMessages();
+        if (messages.length === 0) return null;
+        const saved = activeId ? store.get(activeId) : null;
+        return {
+          title: saved?.title ?? window.Conversations.titleFrom(messages[0].content),
+          messages,
+        };
+      }
+
+      function updateExportButtons() {
+        const has = chat.getMessages().length > 0;
+        for (const id of ['export-md', 'export-json', 'copy-all']) {
+          $(id).disabled = !has;
+        }
+      }
+
+      function download(text, mimeType, filename) {
+        const blob = new Blob([text], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function exportName(conversation, extension) {
+        return window.Filename.filenameFrom(
+          `${conversation.title}-${window.Filename.timestamp()}`,
+          extension,
+          { fallback: 'conversation', maxLength: 60 }
+        );
+      }
+
+      $('export-md').addEventListener('click', () => {
+        const conversation = currentConversation();
+        if (!conversation) return;
+        download(
+          window.Conversations.toMarkdown(conversation, { model: 'claude on bedrock' }),
+          'text/markdown;charset=utf-8',
+          exportName(conversation, 'md')
+        );
+      });
+
+      $('export-json').addEventListener('click', () => {
+        const conversation = currentConversation();
+        if (!conversation) return;
+        download(
+          window.Conversations.toJson(conversation),
+          'application/json;charset=utf-8',
+          exportName(conversation, 'json')
+        );
+      });
+
+      $('copy-all').addEventListener('click', async () => {
+        const conversation = currentConversation();
+        if (!conversation) return;
+        const button = $('copy-all');
+        try {
+          await navigator.clipboard.writeText(
+            window.Conversations.toMarkdown(conversation, { model: 'claude on bedrock' })
+          );
+          button.textContent = 'Copied';
+        } catch {
+          button.textContent = 'Copy failed';
+        }
+        setTimeout(() => { button.textContent = 'Copy all'; }, 1500);
+      });
+
+      $('import').addEventListener('click', () => $('import-file').click());
+
+      $('import-file').addEventListener('change', async (event) => {
+        const file = event.target.files?.[0];
+        // Reset immediately so importing the same file twice still fires.
+        event.target.value = '';
+        if (!file) return;
+
+        errorBox.textContent = '';
+        const result = window.Conversations.fromJson(await file.text());
+        if (!result.ok) {
+          errorBox.textContent = `Could not import that file: ${result.error}`;
+          return;
+        }
+
+        const created = store.create(
+          result.title || result.messages[0]?.content || 'Imported conversation',
+          result.messages
+        );
+        if (result.title) store.rename(created.id, result.title);
+        openConversation(created.id);
+      });
+
       renderSidebar();
+      updateExportButtons();
     })();
   </script>
 </body>
