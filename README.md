@@ -1,78 +1,59 @@
-# AWS AI Services Backend
+# Nova
 
-This project demonstrates various AWS AI services:
-- Text-to-Speech with AWS Polly
-- Live Transcription with AWS Transcribe
-- AI Responses with Claude on AWS Bedrock
+[![CI](https://github.com/hypernovaUSA/3build-nova/actions/workflows/ci.yml/badge.svg)](https://github.com/hypernovaUSA/3build-nova/actions/workflows/ci.yml)
 
-## Setup
+A voice assistant built on three AWS AI services: **Amazon Polly** for speech
+synthesis, **Amazon Transcribe** for live speech to text, and **Claude on Amazon
+Bedrock** for the conversation. Hold a button, speak, and hear an answer — or use
+any of the three services on its own page.
 
-1. Clone this repository
-2. Install dependencies:
-   ```
-   npm install
-   ```
-3. Create a `.env` file in the project root with your AWS credentials:
-   ```
-   AWS_APP_ID=your_aws_access_key_id
-   AWS_APP_SECRET=your_aws_secret_access_key
-   REGION=us-east-1
-   ```
+## Start here
 
-   > **Important**: Your AWS user/role needs permissions for Polly, Transcribe, and Bedrock services.
+| I want to… | Go to |
+| --- | --- |
+| Run the app | [`app/README.md`](./app/README.md) |
+| Understand how it works | [`fabledocs/01-architecture.md`](./fabledocs/01-architecture.md) |
+| Pick up a piece of work | [`fabledocs/03-user-stories-2.md`](./fabledocs/03-user-stories-2.md) |
+| Open my first pull request | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
 
-4. Start the development server:
-   ```
-   npm run dev
-   ```
-5. Open your browser to http://localhost:3000
-
-## Features
-
-### Text-to-Speech (AWS Polly)
-Enter text and have it spoken using AWS Polly's neural voice technology.
-
-### Live Transcription (AWS Transcribe)
-Speak into your microphone and see your words transcribed in real-time.
-
-### AI Assistant (Claude via AWS Bedrock)
-Ask questions and get responses from Claude AI through AWS Bedrock.
-
-## Troubleshooting
-
-### AWS Credentials
-If you see "AWS credentials not configured properly" errors, make sure your `.env` file exists and has the correct credentials.
-
-#### AWS Transcribe Specific Requirements
-For the live transcription feature to work, your AWS credentials need:
-
-1. **Proper Format**:
-   - Access Key ID should start with 'AKIA'
-   - Secret Access Key should be valid
-
-2. **Required Permissions**:
-   - `transcribe:StartStreamTranscription` permission
-   - `transcribe:StartStreamTranscriptionWebSocket` permission
-
-You can create an IAM policy with these permissions:
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "transcribe:StartStreamTranscription",
-        "transcribe:StartStreamTranscriptionWebSocket"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
+```bash
+cd app
+npm ci
+cp .env.example .env      # fill in AWS_APP_ID, AWS_APP_SECRET, REGION
+npm run dev               # http://localhost:3000
 ```
 
-### Microphone Access
-The transcription feature requires microphone access. Make sure to allow it when prompted by your browser.
+## Repository layout
 
-### WebSocket Connection
-If you see "WebSocket closed" errors, check that your AWS credentials have permission to use Transcribe streaming.
+```
+.
+├── app/            The application. All new work happens here.
+├── fabledocs/      Architecture, backlog, and the reasoning behind both.
+├── .github/        CI workflow, PR template, issue templates.
+├── CONTRIBUTING.md How to branch, commit, review, and ship here.
+│
+├── server.js       v1, retired. Commented out, kept for reference.
+└── public/         v1 pages, retired. Commented out, kept for reference.
+```
+
+### About the retired v1
+
+`server.js` and `public/*.html` at the repository root are the original
+implementation. They are commented out in full rather than deleted, so the
+original is readable next to the rewrite while nothing executes. They are not
+served, not tested, and not maintained.
+
+[`fabledocs/01-architecture.md`](./fabledocs/01-architecture.md) explains what
+v1 did and the nine defects found in it — including the one that made the Ask
+Claude page fail on every request. Reading it is the fastest way to understand
+why v2 is shaped the way it is.
+
+## Security posture
+
+There is **no user authentication**. CORS is restricted to configured origins and
+every endpoint is rate limited, but that is a speed bump, not access control.
+`GET /get-signed-url` hands the browser a short-lived credential for direct
+access to AWS Transcribe.
+
+**Do not expose this to the public internet as it stands.** See the security
+section of [`app/README.md`](./app/README.md) before deploying anywhere.
