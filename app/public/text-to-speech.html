@@ -78,6 +78,7 @@
   </main>
 
   <script src="/js/nav.js"></script>
+  <script src="/js/filename.js"></script>
   <script>
     (function () {
       'use strict';
@@ -218,16 +219,8 @@
 
       // --- synthesis -------------------------------------------------------
 
-      function filenameFrom(text) {
-        const slug = text
-          .replace(/<[^>]*>/g, ' ')
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-+|-+$/g, '')
-          .slice(0, 40)
-          .replace(/-+$/, '');
-        return `${slug || 'speech'}.mp3`;
-      }
+      const filenameFrom = (text) =>
+        window.Filename.filenameFrom(text, 'mp3', { fallback: 'speech' });
 
       async function speak() {
         errorBox.textContent = '';
