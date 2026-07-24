@@ -38,6 +38,32 @@ region**, and current-generation models generally require a cross-region
 inference profile. If Claude calls fail with `AccessDeniedException` or
 `ValidationException`, check that console setting before suspecting the code.
 
+## Running in a container
+
+```bash
+docker build -t nova-app ./app
+
+docker run --rm -p 3000:3000 \
+  -e AWS_APP_ID=... -e AWS_APP_SECRET=... -e REGION=us-east-1 \
+  nova-app
+```
+
+The image reads **all** configuration from the environment and never contains a
+`.env` file — `.dockerignore` excludes it, so a credential cannot be baked in by
+accident.
+
+Passing secrets with `-e` puts them in your shell history and in
+`docker inspect`. For anything beyond a local trial use `--env-file` with a file
+outside the build context, or your platform's secret store:
+
+```bash
+docker run --rm -p 3000:3000 --env-file ../nova.env nova-app
+```
+
+The container runs as the unprivileged `node` user and declares a `HEALTHCHECK`
+against `/health`, which makes no AWS calls — so a Bedrock outage cannot mark an
+otherwise healthy container unhealthy.
+
 ## The four pages
 
 | Page | What it does |

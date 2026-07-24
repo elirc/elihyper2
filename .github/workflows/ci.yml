@@ -67,3 +67,35 @@ jobs:
       # transitive advisory nobody can action just teaches people to ignore
       # red checks, which is worse than the advisory.
       - run: npm audit --audit-level=high || true
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build only - nothing is pushed anywhere. This exists to catch a
+      # Dockerfile that stopped building, which otherwise surfaces at deploy
+      # time when it is most expensive.
+      - name: Build image
+        run: docker build -t nova-app:ci ./app
+
+      - name: Check the image starts and reports healthy
+        run: |
+          docker run -d --name nova-ci -p 3000:3000 \
+            -e AWS_APP_ID=AKIAIOSFODNN7EXAMPLE \
+            -e AWS_APP_SECRET=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY \
+            -e REGION=us-east-1 \
+            nova-app:ci
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:3000/health > /dev/null; then
+              echo "healthy after ${i} attempt(s)"
+              docker rm -f nova-ci
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "container never became healthy; logs follow:"
+          docker logs nova-ci
+          docker rm -f nova-ci
+          exit 1
