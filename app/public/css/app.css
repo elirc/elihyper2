@@ -311,6 +311,79 @@ details.debug pre {
   color: var(--text-muted);
 }
 
+/* ---- Conversation sidebar ------------------------------------------------ */
+
+.with-sidebar {
+  display: grid;
+  grid-template-columns: 15rem 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.sidebar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .75rem;
+  position: sticky;
+  top: 4.5rem;
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+}
+.sidebar h2 { margin: 0 0 .5rem; font-size: .8125rem; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text-muted); }
+
+.conversation-list { list-style: none; margin: 0; padding: 0; }
+.conversation-list li { margin-bottom: .25rem; }
+
+.conversation-item {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  border-radius: 8px;
+}
+.conversation-item:hover { background: var(--surface-2); }
+.conversation-item[aria-current="true"] { background: var(--accent-soft); }
+
+.conversation-open {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-weight: 500;
+  padding: .45rem .5rem;
+  cursor: pointer;
+}
+.conversation-open .name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .875rem;
+}
+.conversation-open .when { display: block; font-size: .75rem; color: var(--text-muted); }
+
+.conversation-action {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: .3rem .4rem;
+  cursor: pointer;
+  font-size: .8125rem;
+  border-radius: 6px;
+}
+.conversation-action:hover { color: var(--text); background: var(--surface-2); }
+.conversation-action.remove:hover { color: var(--danger); }
+
+.sidebar-empty { color: var(--text-muted); font-size: .8125rem; margin: .25rem .5rem; }
+
+@media (max-width: 720px) {
+  .with-sidebar { grid-template-columns: 1fr; }
+  .sidebar { position: static; max-height: 18rem; }
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px; height: 1px;

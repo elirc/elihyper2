@@ -16,6 +16,14 @@
 
     <div class="alert" id="error" role="alert"></div>
 
+    <div class="with-sidebar">
+    <aside class="sidebar" aria-labelledby="saved-heading">
+      <h2 id="saved-heading">Saved conversations</h2>
+      <ul class="conversation-list" id="conversation-list"></ul>
+      <p class="sidebar-empty" id="sidebar-empty">Nothing saved yet.</p>
+    </aside>
+
+    <div>
     <div class="card">
       <div class="row">
         <div class="field">
@@ -51,11 +59,14 @@
         <span class="status" id="status" role="status" data-state="idle">Ready</span>
       </div>
     </div>
+    </div>
+    </div>
   </main>
 
   <script src="/js/nav.js"></script>
   <script src="/js/markdown.js"></script>
   <script src="/js/presets.js"></script>
+  <script src="/js/conversations.js"></script>
   <script src="/js/chat.js"></script>
   <script>
     (function () {
@@ -181,6 +192,137 @@
         },
       });
 
+      // --- saved conversations -------------------------------------------
+
+      const store = window.Conversations.createConversationStore({
+        storage: window.localStorage,
+        onEviction(count) {
+          errorBox.textContent =
+            `Storage was full, so ${count} older conversation(s) were removed.`;
+        },
+      });
+
+      const listEl = $('conversation-list');
+      const emptyEl = $('sidebar-empty');
+      let activeId = null;
+
+      function relative(timestamp) {
+        const seconds = Math.round((Date.now() - timestamp) / 1000);
+        if (seconds < 60) return 'just now';
+        if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+        if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+        return `${Math.floor(seconds / 86400)}d ago`;
+      }
+
+      function renderSidebar() {
+        const conversations = store.list();
+        listEl.replaceChildren();
+        emptyEl.hidden = conversations.length > 0;
+
+        for (const conversation of conversations) {
+          const item = document.createElement('div');
+          item.className = 'conversation-item';
+          if (conversation.id === activeId) item.setAttribute('aria-current', 'true');
+
+          const open = document.createElement('button');
+          open.type = 'button';
+          open.className = 'conversation-open';
+          // textContent throughout: titles come from user messages.
+          const name = document.createElement('span');
+          name.className = 'name';
+          name.textContent = conversation.title;
+          const when = document.createElement('span');
+          when.className = 'when';
+          when.textContent = `${relative(conversation.updatedAt)} · ${conversation.messageCount} messages`;
+          open.append(name, when);
+          open.addEventListener('click', () => openConversation(conversation.id));
+
+          const renameButton = document.createElement('button');
+          renameButton.type = 'button';
+          renameButton.className = 'conversation-action';
+          renameButton.textContent = '✎';
+          renameButton.setAttribute('aria-label', `Rename "${conversation.title}"`);
+          renameButton.addEventListener('click', () => {
+            const next = window.prompt('Conversation name', conversation.title);
+            if (next !== null) {
+              store.rename(conversation.id, next);
+              renderSidebar();
+            }
+          });
+
+          const removeButton = document.createElement('button');
+          removeButton.type = 'button';
+          removeButton.className = 'conversation-action remove';
+          removeButton.textContent = '×';
+          removeButton.setAttribute('aria-label', `Delete "${conversation.title}"`);
+          removeButton.addEventListener('click', () => {
+            if (!window.confirm(`Delete "${conversation.title}"? This cannot be undone.`)) return;
+            store.remove(conversation.id);
+            if (activeId === conversation.id) startNewConversation();
+            renderSidebar();
+          });
+
+          item.append(open, renameButton, removeButton);
+          const row = document.createElement('li');
+          row.appendChild(item);
+          listEl.appendChild(row);
+        }
+      }
+
+      function renderTranscript(messages) {
+        transcript.replaceChildren();
+        if (messages.length === 0) {
+          const empty = document.createElement('p');
+          empty.className = 'hint';
+          empty.id = 'empty-state';
+          empty.textContent = 'Nothing yet. Ask a question below.';
+          transcript.appendChild(empty);
+          return;
+        }
+        for (const message of messages) {
+          const isUser = message.role === 'user';
+          const { turn, bubble } = addTurn(isUser ? 'user' : 'assistant', isUser ? 'You' : 'Claude');
+          if (isUser) bubble.textContent = message.content;
+          else bubble.innerHTML = window.Markdown.render(message.content);
+          addCopyButton(turn, () => message.content);
+        }
+      }
+
+      function openConversation(id) {
+        if (chat.isBusy()) return;
+        const conversation = store.get(id);
+        if (!conversation) return;
+
+        activeId = id;
+        chat.load(conversation.messages);
+        renderTranscript(conversation.messages);
+        renderSidebar();
+        errorBox.textContent = '';
+        input.focus();
+      }
+
+      function startNewConversation() {
+        chat.reset();
+        activeId = null;
+        renderTranscript([]);
+        renderSidebar();
+        errorBox.textContent = '';
+      }
+
+      // Called after every completed turn. Creating on first message rather
+      // than on page load is what stops empty shells accumulating.
+      function persist(firstUserMessage) {
+        const messages = chat.getMessages();
+        if (messages.length === 0) return;
+
+        if (activeId === null) {
+          activeId = store.create(firstUserMessage, messages).id;
+        } else {
+          store.save(activeId, messages);
+        }
+        renderSidebar();
+      }
+
       async function send() {
         const text = input.value.trim();
         errorBox.textContent = '';
@@ -228,6 +370,10 @@
         } finally {
           currentAnswerEl = null;
           setBusy(false);
+          // Persist whatever the exchange produced, including a partial answer
+          // that was stopped part way - that is still something the user may
+          // want back after a reload.
+          persist(text);
           input.focus();
         }
       }
@@ -235,9 +381,7 @@
       sendButton.addEventListener('click', send);
       stopButton.addEventListener('click', () => chat.abort());
       resetButton.addEventListener('click', () => {
-        chat.reset();
-        transcript.innerHTML = '<p class="hint" id="empty-state">Nothing yet. Ask a question below.</p>';
-        errorBox.textContent = '';
+        startNewConversation();
         input.focus();
       });
 
@@ -247,6 +391,8 @@
           send();
         }
       });
+
+      renderSidebar();
     })();
   </script>
 </body>
