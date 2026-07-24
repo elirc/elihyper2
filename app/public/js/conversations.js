@@ -182,7 +182,89 @@
     return { list, get, create, save, rename, remove, clear };
   }
 
-  const api = { createConversationStore, titleFrom, SCHEMA_VERSION, STORAGE_KEY };
+  // --- export / import -----------------------------------------------------
+
+  function toMarkdown(conversation, { model = 'unknown', exportedAt = new Date() } = {}) {
+    const lines = [
+      `# ${conversation.title}`,
+      '',
+      `_Exported ${exportedAt.toISOString().slice(0, 16).replace('T', ' ')} · model: ${model}_`,
+      '',
+    ];
+
+    for (const message of conversation.messages) {
+      lines.push(message.role === 'user' ? '## You' : '## Claude', '', message.content, '');
+    }
+
+    return lines.join('\n').trimEnd() + '\n';
+  }
+
+  function toJson(conversation) {
+    return JSON.stringify({ version: SCHEMA_VERSION, conversation }, null, 2);
+  }
+
+  // Import is untrusted input: it is a file the user picked, and there is no
+  // guarantee this app wrote it. Validate the shape before anything is stored,
+  // and reject rather than repair - a half-understood record is worse than a
+  // clear error.
+  const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+  const MAX_IMPORT_MESSAGES = 2000;
+
+  function fromJson(text) {
+    if (typeof text !== 'string') return { ok: false, error: 'Not a text file.' };
+    if (text.length > MAX_IMPORT_BYTES) {
+      return { ok: false, error: 'That file is too large to import.' };
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return { ok: false, error: 'That file is not valid JSON.' };
+    }
+
+    if (!parsed || parsed.version !== SCHEMA_VERSION) {
+      return { ok: false, error: 'That file was exported by a different version of this app.' };
+    }
+
+    const conversation = parsed.conversation;
+    if (!conversation || typeof conversation !== 'object' || !Array.isArray(conversation.messages)) {
+      return { ok: false, error: 'That file does not contain a conversation.' };
+    }
+    if (conversation.messages.length > MAX_IMPORT_MESSAGES) {
+      return { ok: false, error: 'That conversation has too many messages to import.' };
+    }
+
+    const messages = [];
+    for (const message of conversation.messages) {
+      if (
+        !message ||
+        (message.role !== 'user' && message.role !== 'assistant') ||
+        typeof message.content !== 'string'
+      ) {
+        return { ok: false, error: 'That conversation contains a message in an unexpected format.' };
+      }
+      // Only role and content are carried over. Anything else in the file is
+      // discarded rather than trusted into our store.
+      messages.push({ role: message.role, content: message.content });
+    }
+
+    return {
+      ok: true,
+      title: typeof conversation.title === 'string' ? conversation.title : '',
+      messages,
+    };
+  }
+
+  const api = {
+    createConversationStore,
+    titleFrom,
+    toMarkdown,
+    toJson,
+    fromJson,
+    SCHEMA_VERSION,
+    STORAGE_KEY,
+  };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.Conversations = api;
