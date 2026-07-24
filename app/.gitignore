@@ -1,0 +1,8 @@
+# The repo root .gitignore anchors its .env rule with a leading slash, so it
+# only covers the root file. This keeps app/.env out of version control too.
+.env
+.env.*
+!.env.example
+
+node_modules/
+*.log
