@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
 
-const { buildApp, createFakePolly, createFakeClaude, AUDIO } = require('./helpers');
+const { buildApp, createFakePolly, createFakeClaude, AUDIO } = require('../test-support/helpers');
 
 // ---- health -----------------------------------------------------------------
 
