@@ -7,6 +7,9 @@ const { notFound, errorHandler } = require('./middleware/error-handler');
 const { createRequestLogger } = require('./lib/logger');
 const { AudioCache } = require('./lib/audio-cache');
 const { createPricing } = require('./lib/pricing');
+const { createMetrics } = require('./lib/metrics');
+const { createMetricsMiddleware } = require('./middleware/metrics');
+const { createMetricsRouter } = require('./routes/metrics');
 const { createSpeakRouter } = require('./routes/speak');
 const { createClaudeRouter } = require('./routes/claude');
 const { createTranscribeRouter } = require('./routes/transcribe');
@@ -27,8 +30,14 @@ function createApp({ polly, claude, buildSignedUrl, config, logger }) {
 
   const audioCache = new AudioCache(config.cache);
   const pricing = createPricing(config.pricing);
+  const metrics = createMetrics();
+
+  // Registered before the routers so it observes every request, including
+  // ones that never match a route.
+  app.use(createMetricsMiddleware(metrics));
 
   app.use(createHealthRouter({ config, audioCache, pricing }));
+  app.use(createMetricsRouter({ metrics, audioCache, pricing }));
 
   app.use('/speak', createLimiter({ config, max: config.rateLimit.speak }));
   app.use('/ask-claude', createLimiter({ config, max: config.rateLimit.askClaude }));
