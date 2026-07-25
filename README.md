@@ -1,6 +1,6 @@
 # Nova
 
-[![CI](https://github.com/hypernovaUSA/3build-nova/actions/workflows/ci.yml/badge.svg)](https://github.com/hypernovaUSA/3build-nova/actions/workflows/ci.yml)
+[![CI](https://github.com/elirc/3build-nova/actions/workflows/ci.yml/badge.svg)](https://github.com/elirc/3build-nova/actions/workflows/ci.yml)
 
 A voice assistant built on three AWS AI services: **Amazon Polly** for speech
 synthesis, **Amazon Transcribe** for live speech to text, and **Claude on Amazon

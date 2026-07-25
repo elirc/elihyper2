@@ -13,7 +13,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-$Owner = 'hypernovaUSA'
+$Owner = 'elirc'
 $Repo  = '3build-nova'
 
 Write-Host "Checking gh authentication..." -ForegroundColor Cyan
