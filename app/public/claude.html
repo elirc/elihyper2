@@ -77,6 +77,7 @@
   <script src="/js/palette.js"></script>
   <script src="/js/markdown.js"></script>
   <script src="/js/presets.js"></script>
+  <script src="/js/prompts.js"></script>
   <script src="/js/filename.js"></script>
   <script src="/js/conversations.js"></script>
   <script src="/js/chat.js"></script>
@@ -646,6 +647,74 @@
         if (result.title) store.rename(created.id, result.title);
         openConversation(created.id);
       });
+
+      // --- prompt library ---------------------------------------------------
+
+      const promptStore = window.Prompts.createPromptStore({ storage: window.localStorage });
+
+      function insertPrompt(prompt) {
+        const names = window.Prompts.variablesIn(prompt.body);
+        const values = {};
+
+        for (const name of names) {
+          const value = window.prompt(`Value for "${name}"`, '');
+          // Cancelling any one variable abandons the whole insertion rather
+          // than leaving a half-filled template in the composer.
+          if (value === null) return;
+          values[name] = value;
+        }
+
+        // Assigned to .value, never rendered as HTML.
+        input.value = window.Prompts.fill(prompt.body, values);
+        input.focus();
+      }
+
+      function registerPromptCommands() {
+        for (const prompt of promptStore.list()) {
+          window.Commands.register({
+            id: `prompt.use.${prompt.id}`,
+            label: `Prompt: ${prompt.name}`,
+            hint: 'prompt library',
+            run: () => insertPrompt(promptStore.get(prompt.id) ?? prompt),
+          });
+        }
+      }
+
+      window.Commands.register({
+        id: 'prompt.save',
+        label: 'Save the current message as a prompt',
+        available: () => input.value.trim().length > 0,
+        run() {
+          const name = window.prompt('Name this prompt', '');
+          if (name === null) return;
+          promptStore.save({ name, body: input.value });
+          registerPromptCommands();
+          errorBox.textContent = '';
+        },
+      });
+
+      window.Commands.register({
+        id: 'prompt.manage',
+        label: 'Delete a saved prompt',
+        run() {
+          const prompts = promptStore.list();
+          const chosen = window.prompt(
+            `Delete which prompt?\n\n${prompts.map((p, i) => `${i + 1}. ${p.name}`).join('\n')}\n\nEnter a number:`
+          );
+          const index = Number(chosen) - 1;
+          if (!Number.isInteger(index) || index < 0 || index >= prompts.length) return;
+          promptStore.remove(prompts[index].id);
+          registerPromptCommands();
+        },
+      });
+
+      window.Commands.register({
+        id: 'prompt.export',
+        label: 'Export the prompt library',
+        run: () => download(promptStore.toJson(), 'application/json;charset=utf-8', 'prompts.json'),
+      });
+
+      registerPromptCommands();
 
       // --- commands ---------------------------------------------------------
 
