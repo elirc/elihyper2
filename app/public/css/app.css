@@ -508,6 +508,17 @@ details.debug pre {
 }
 .offline-banner[hidden] { display: none; }
 
+mark {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 .1em;
+}
+mark.is-active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px; height: 1px;
