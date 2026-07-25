@@ -519,6 +519,40 @@ mark.is-active {
   color: var(--accent-text);
 }
 
+/* ---- Dashboard ----------------------------------------------------------- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: .75rem 1rem;
+  margin: 0;
+}
+.stat-grid dt {
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+}
+.stat-grid dd { margin: .15rem 0 0; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+
+.metrics-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: .875rem;
+}
+.metrics-table th, .metrics-table td {
+  text-align: left;
+  padding: .5rem .7rem;
+  border-bottom: 1px solid var(--border);
+}
+.metrics-table th { background: var(--surface-2); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+.metrics-table tr:last-child td { border-bottom: none; }
+.metrics-table td:not(:first-child) { font-variant-numeric: tabular-nums; }
+
 .visually-hidden {
   position: absolute;
   width: 1px; height: 1px;
