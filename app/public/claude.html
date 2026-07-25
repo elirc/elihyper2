@@ -66,6 +66,7 @@
         <button id="copy-all" type="button" class="secondary" disabled>Copy all</button>
         <span class="status" id="status" role="status" data-state="idle">Ready</span>
       </div>
+      <p class="hint" id="usage-total" aria-live="polite"></p>
     </div>
     </div>
     </div>
@@ -214,6 +215,7 @@
       const listEl = $('conversation-list');
       const emptyEl = $('sidebar-empty');
       let activeId = null;
+      let pendingUsage = null;
 
       function relative(timestamp) {
         const seconds = Math.round((Date.now() - timestamp) / 1000);
@@ -381,6 +383,7 @@
         renderTranscript([]);
         renderSidebar();
         updateExportButtons();
+        resetUsage();
         errorBox.textContent = '';
       }
 
@@ -442,6 +445,9 @@
           } else {
             addCopyButton(answer.turn, () => result.text);
           }
+          // Deferred: the transcript is rebuilt in the finally block below,
+          // which would discard a usage line appended here.
+          pendingUsage = { usage: result.usage, cost: result.cost };
         } catch (err) {
           errorBox.textContent = err.message;
           if (!currentAnswerEl.textContent.trim() || currentAnswerEl.querySelector('.hint')) {
@@ -458,6 +464,10 @@
           // button with the right index. Re-rendering beats patching indices
           // by hand, which is where off-by-ones live.
           renderTranscript(chat.getMessages());
+          if (pendingUsage) {
+            recordUsage(pendingUsage.usage, pendingUsage.cost);
+            pendingUsage = null;
+          }
           input.focus();
         }
       }
@@ -475,6 +485,70 @@
           send();
         }
       });
+
+      // --- token usage and cost --------------------------------------------
+
+      const usageTotals = { input: 0, output: 0, cached: 0, cost: 0, priced: false };
+
+      function formatCost(amount) {
+        // Short turns genuinely cost fractions of a cent, so two decimal
+        // places would render most of them as $0.00.
+        if (amount >= 0.01) return `$${amount.toFixed(2)}`;
+        if (amount > 0) return `$${amount.toFixed(5)}`;
+        return '$0';
+      }
+
+      function recordUsage(usage, cost) {
+        if (!usage) return;
+
+        usageTotals.input += cost?.inputTokens ?? usage.input_tokens ?? 0;
+        usageTotals.output += cost?.outputTokens ?? usage.output_tokens ?? 0;
+        usageTotals.cached += cost?.cachedInputTokens ?? usage.cache_read_input_tokens ?? 0;
+        if (cost && typeof cost.amount === 'number') {
+          usageTotals.cost += cost.amount;
+          usageTotals.priced = true;
+        }
+
+        const line = document.createElement('p');
+        line.className = 'hint usage-line';
+        const tokens =
+          `${usageTotals.input ? '' : ''}${cost?.inputTokens ?? usage.input_tokens ?? 0} in · ` +
+          `${cost?.outputTokens ?? usage.output_tokens ?? 0} out`;
+        line.textContent =
+          cost && typeof cost.amount === 'number'
+            ? `${tokens} · ~${formatCost(cost.amount)} (estimate)`
+            : `${tokens} · cost estimate unavailable (rates not configured)`;
+
+        // Attach to the assistant turn that was just completed.
+        const turns = transcript.querySelectorAll('.turn.assistant');
+        turns[turns.length - 1]?.appendChild(line);
+
+        renderUsageTotal();
+      }
+
+      function renderUsageTotal() {
+        const target = $('usage-total');
+        if (usageTotals.input + usageTotals.output === 0) {
+          target.textContent = '';
+          return;
+        }
+        const base =
+          `${usageTotals.input.toLocaleString()} in · ` +
+          `${usageTotals.output.toLocaleString()} out` +
+          (usageTotals.cached ? ` · ${usageTotals.cached.toLocaleString()} cached` : '');
+        target.textContent = usageTotals.priced
+          ? `${base} · ~${formatCost(usageTotals.cost)} this conversation (estimate)`
+          : `${base} · cost estimate unavailable`;
+      }
+
+      function resetUsage() {
+        usageTotals.input = 0;
+        usageTotals.output = 0;
+        usageTotals.cached = 0;
+        usageTotals.cost = 0;
+        usageTotals.priced = false;
+        renderUsageTotal();
+      }
 
       // --- export / import ------------------------------------------------
 
