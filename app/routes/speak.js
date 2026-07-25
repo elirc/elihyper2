@@ -3,7 +3,13 @@ const { SynthesizeSpeechCommand } = require('@aws-sdk/client-polly');
 
 const { AudioCache } = require('../lib/audio-cache');
 const { createVoiceCatalogue } = require('../lib/voices');
-const { normaliseSpeechText, oneOf } = require('../lib/validate');
+const {
+  normaliseSpeechText,
+  normaliseProsody,
+  wrapInProsody,
+  oneOf,
+  PROSODY_LIMITS,
+} = require('../lib/validate');
 const { badRequest } = require('../lib/errors');
 
 const OUTPUT_FORMAT = 'mp3';
@@ -41,17 +47,27 @@ function createSpeakRouter({ polly, config, cache }) {
         engine: config.polly.defaultEngine,
       },
       maxCharacters: config.polly.maxCharacters,
+      prosody: PROSODY_LIMITS,
     });
   });
 
   router.post('/speak', async (req, res) => {
     const body = req.body ?? {};
 
-    const textType = oneOf(body.textType, TEXT_TYPES, 'textType', 'text');
+    const requestedType = oneOf(body.textType, TEXT_TYPES, 'textType', 'text');
     const text = normaliseSpeechText(body.text, {
       maxCharacters: config.polly.maxCharacters,
-      textType,
+      textType: requestedType,
     });
+
+    const prosody = normaliseProsody(body.prosody);
+
+    // Plain text with non-default controls becomes SSML. Text the caller
+    // already supplied as SSML is left alone rather than double-wrapped -
+    // nesting <speak> is invalid, and re-escaping would break their markup.
+    const applyProsody = requestedType === 'text' && !prosody.isDefault;
+    const spokenText = applyProsody ? wrapInProsody(text, prosody) : text;
+    const textType = applyProsody ? 'ssml' : requestedType;
 
     const voiceId = body.voiceId ?? config.polly.defaultVoiceId;
     const voice = await voices.find(voiceId);
@@ -67,8 +83,11 @@ function createSpeakRouter({ polly, config, cache }) {
       );
     }
 
+    // Keyed on the text actually sent to Polly, so a change of rate or pitch
+    // produces a different key. Keying on the original text would serve
+    // audio at the wrong speed from cache.
     const key = AudioCache.key({
-      text,
+      text: spokenText,
       voiceId,
       engine,
       outputFormat: OUTPUT_FORMAT,
@@ -106,7 +125,7 @@ function createSpeakRouter({ polly, config, cache }) {
     const response = await polly.send(
       new SynthesizeSpeechCommand({
         OutputFormat: OUTPUT_FORMAT,
-        Text: text,
+        Text: spokenText,
         TextType: textType,
         VoiceId: voiceId,
         Engine: engine,
