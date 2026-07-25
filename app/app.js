@@ -6,6 +6,7 @@ const { createLimiter } = require('./middleware/rate-limit');
 const { notFound, errorHandler } = require('./middleware/error-handler');
 const { createRequestLogger } = require('./lib/logger');
 const { AudioCache } = require('./lib/audio-cache');
+const { createPricing } = require('./lib/pricing');
 const { createSpeakRouter } = require('./routes/speak');
 const { createClaudeRouter } = require('./routes/claude');
 const { createTranscribeRouter } = require('./routes/transcribe');
@@ -25,8 +26,9 @@ function createApp({ polly, claude, buildSignedUrl, config, logger }) {
   app.use(express.json({ limit: '64kb' }));
 
   const audioCache = new AudioCache(config.cache);
+  const pricing = createPricing(config.pricing);
 
-  app.use(createHealthRouter({ config, audioCache }));
+  app.use(createHealthRouter({ config, audioCache, pricing }));
 
   app.use('/speak', createLimiter({ config, max: config.rateLimit.speak }));
   app.use('/ask-claude', createLimiter({ config, max: config.rateLimit.askClaude }));
@@ -34,7 +36,7 @@ function createApp({ polly, claude, buildSignedUrl, config, logger }) {
 
   const speak = createSpeakRouter({ polly, config, cache: audioCache });
   app.use(speak.router);
-  app.use(createClaudeRouter({ claude, config }));
+  app.use(createClaudeRouter({ claude, config, pricing }));
   app.use(createTranscribeRouter({ buildSignedUrl, config }));
 
   app.use(

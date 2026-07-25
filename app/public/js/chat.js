@@ -100,6 +100,8 @@
       const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = '';
       let stopReason = null;
+      let usage = null;
+      let cost = null;
       let failure = null;
 
       try {
@@ -129,6 +131,8 @@
               splitter.push(payload.text);
             } else if (payload.type === 'done') {
               stopReason = payload.stopReason;
+              usage = payload.usage ?? null;
+              cost = payload.cost ?? null;
             } else if (payload.type === 'error') {
               failure = new Error(payload.message);
             }
@@ -151,8 +155,8 @@
         throw failure;
       }
 
-      onDone(answer, stopReason);
-      return { text: answer, stopReason };
+      onDone(answer, { stopReason, usage, cost });
+      return { text: answer, stopReason, usage, cost };
     }
 
     return { send, abort, reset, load, getMessages, isBusy: () => controller !== null };

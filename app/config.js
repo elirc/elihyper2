@@ -93,6 +93,16 @@ function load(env = process.env) {
       sampleRates: TRANSCRIBE_SAMPLE_RATES,
     }),
 
+    // Per-million-token rates from the AWS Bedrock pricing page for your
+    // region. Bedrock is partner-operated: AWS sets these, and they are not
+    // Anthropic's first-party prices. Default 0 means "not configured", and
+    // the UI then reports the estimate as unavailable instead of showing $0.
+    pricing: Object.freeze({
+      inputPerMillion: num(env.PRICE_INPUT_PER_MILLION, 0),
+      outputPerMillion: num(env.PRICE_OUTPUT_PER_MILLION, 0),
+      cachedInputPerMillion: num(env.PRICE_CACHED_INPUT_PER_MILLION, 0),
+    }),
+
     chat: Object.freeze({
       maxMessages: num(env.CHAT_MAX_MESSAGES, 40),
       maxTotalCharacters: num(env.CHAT_MAX_TOTAL_CHARACTERS, 50_000),
