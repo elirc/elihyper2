@@ -9,6 +9,7 @@
     { href: '/claude.html', label: 'Ask Claude' },
     { href: '/text-to-speech.html', label: 'Text to Speech' },
     { href: '/transcribe.html', label: 'Live Transcription' },
+    { href: '/dashboard.html', label: 'Dashboard' },
   ];
 
   function render() {
