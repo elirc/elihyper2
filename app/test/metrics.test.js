@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const request = require('supertest');
 
 const { createMetrics, percentile } = require('../lib/metrics');
-const { buildApp } = require('./helpers');
+const { buildApp } = require('../test-support/helpers');
 
 test('percentile of an empty set is zero rather than undefined', () => {
   assert.strictEqual(percentile([], 95), 0);
