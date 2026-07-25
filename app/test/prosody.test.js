@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const request = require('supertest');
 
 const { normaliseProsody, wrapInProsody, escapeXml } = require('../lib/validate');
-const { buildApp, createFakePolly } = require('./helpers');
+const { buildApp, createFakePolly } = require('../test-support/helpers');
 
 test('defaults are applied and flagged as default', () => {
   const prosody = normaliseProsody({});

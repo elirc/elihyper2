@@ -1,6 +1,10 @@
 const { Readable } = require('node:stream');
 const { DescribeVoicesCommand, SynthesizeSpeechCommand } = require('@aws-sdk/client-polly');
 
+// Lives outside test/ deliberately. `node --test` with no arguments treats
+// every file under a directory named `test` as a test file, so a helper in
+// there gets executed as one - inflating the count and turning an import
+// error into a confusing test failure.
 const { load } = require('../config');
 const { createApp } = require('../app');
 const { createSignedUrlBuilder } = require('../lib/transcribe-url');
