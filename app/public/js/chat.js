@@ -6,9 +6,18 @@
 (function (window) {
   'use strict';
 
-  function createChat({ onDelta = () => {}, onSentence = () => {}, onDone = () => {}, onError = () => {} } = {}) {
+  function createChat({
+    onDelta = () => {},
+    onSentence = () => {},
+    onDone = () => {},
+    onError = () => {},
+    onRetry = () => {},
+  } = {}) {
     let messages = [];
     let controller = null;
+    let lastAttempt = null;
+
+    const http = window.Http.createHttp({ onRetry });
 
     function getMessages() {
       return messages.slice();
@@ -77,9 +86,14 @@
       const splitter = createSentenceSplitter(onSentence);
       let answer = '';
 
+      // Remembered so a failed send can be retried without the user retyping.
+      lastAttempt = { text: trimmed, tone };
+
       let response;
       try {
-        response = await fetch('/ask-claude?stream=1', {
+        // Safe to retry: a request that failed produced no assistant turn, so
+        // resending cannot duplicate anything.
+        response = await http.request('/ask-claude?stream=1', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
           body: JSON.stringify({ messages: outgoing, tone }),
@@ -159,7 +173,21 @@
       return { text: answer, stopReason, usage, cost };
     }
 
-    return { send, abort, reset, load, getMessages, isBusy: () => controller !== null };
+    function retryLast() {
+      if (!lastAttempt) return null;
+      return send(lastAttempt.text, { tone: lastAttempt.tone });
+    }
+
+    return {
+      send,
+      retryLast,
+      hasRetryable: () => lastAttempt !== null,
+      abort,
+      reset,
+      load,
+      getMessages,
+      isBusy: () => controller !== null,
+    };
   }
 
   window.Chat = { createChat };
