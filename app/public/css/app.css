@@ -493,6 +493,21 @@ details.debug pre {
 
 .usage-line { margin: .4rem 0 0; font-size: .75rem; }
 
+.offline-banner {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 1rem;
+  background: var(--danger);
+  color: #fff;
+  padding: .55rem 1rem;
+  border-radius: 999px;
+  font-size: .875rem;
+  z-index: 90;
+  box-shadow: var(--shadow);
+}
+.offline-banner[hidden] { display: none; }
+
 .visually-hidden {
   position: absolute;
   width: 1px; height: 1px;
