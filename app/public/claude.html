@@ -288,13 +288,77 @@
           transcript.appendChild(empty);
           return;
         }
-        for (const message of messages) {
+        messages.forEach((message, index) => {
           const isUser = message.role === 'user';
           const { turn, bubble } = addTurn(isUser ? 'user' : 'assistant', isUser ? 'You' : 'Claude');
           if (isUser) bubble.textContent = message.content;
           else bubble.innerHTML = window.Markdown.render(message.content);
           addCopyButton(turn, () => message.content);
+          addTurnActions(turn, index, message);
+        });
+      }
+
+      function actionButton(label, describedAs, onClick) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'secondary';
+        button.style.marginTop = '.5rem';
+        button.style.marginLeft = '.35rem';
+        button.textContent = label;
+        button.setAttribute('aria-label', describedAs);
+        button.addEventListener('click', onClick);
+        return button;
+      }
+
+      function addTurnActions(turn, index, message) {
+        if (message.role === 'assistant') {
+          turn.appendChild(
+            actionButton('Regenerate', 'Regenerate this answer', () => regenerate(index))
+          );
+        } else {
+          turn.appendChild(
+            actionButton('Edit', 'Edit this message and send it again', () => editTurn(index))
+          );
         }
+      }
+
+      // Both actions are the same operation: truncate the history and send
+      // again. Resisting a separate "edit mode" state machine is what keeps
+      // this to a handful of lines.
+      function truncateTo(index) {
+        const kept = chat.getMessages().slice(0, index);
+        chat.load(kept);
+        if (activeId) store.save(activeId, kept);
+        renderTranscript(kept);
+        renderSidebar();
+        updateExportButtons();
+        return kept;
+      }
+
+      async function regenerate(index) {
+        if (chat.isBusy()) return;
+        const messages = chat.getMessages();
+        const promptIndex = index - 1;
+        if (messages[promptIndex]?.role !== 'user') return;
+
+        const prompt = messages[promptIndex].content;
+        // Drop the user turn too, because sendText re-adds it.
+        truncateTo(promptIndex);
+        await sendText(prompt);
+      }
+
+      function editTurn(index) {
+        if (chat.isBusy()) return;
+        const messages = chat.getMessages();
+        const discarded = messages.length - index;
+
+        if (discarded > 1 && !window.confirm(
+          `Editing this message discards ${discarded} later message(s). Continue?`
+        )) return;
+
+        input.value = messages[index].content;
+        truncateTo(index);
+        input.focus();
       }
 
       function openConversation(id) {
@@ -337,12 +401,17 @@
 
       async function send() {
         const text = input.value.trim();
-        errorBox.textContent = '';
         if (!text) {
           errorBox.textContent = 'Please type a message first.';
           input.focus();
           return;
         }
+        input.value = '';
+        await sendText(text);
+      }
+
+      async function sendText(text) {
+        errorBox.textContent = '';
 
         const preset = window.Presets.byId(presetSelect.value);
         if (preset?.custom && customPrompt.value.length > window.Presets.MAX_CUSTOM_LENGTH) {
@@ -355,7 +424,6 @@
         user.bubble.textContent = text;
         addCopyButton(user.turn, () => text);
 
-        input.value = '';
         setBusy(true);
 
         const answer = addTurn('assistant', 'Claude');
@@ -386,6 +454,10 @@
           // that was stopped part way - that is still something the user may
           // want back after a reload.
           persist(text);
+          // Rebuild from the message array so every turn carries an action
+          // button with the right index. Re-rendering beats patching indices
+          // by hand, which is where off-by-ones live.
+          renderTranscript(chat.getMessages());
           input.focus();
         }
       }
