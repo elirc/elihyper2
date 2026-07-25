@@ -9,7 +9,7 @@ function sse(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-function createClaudeRouter({ claude, config }) {
+function createClaudeRouter({ claude, config, pricing }) {
   const router = express.Router();
 
   function readRequest(req) {
@@ -56,11 +56,16 @@ function createClaudeRouter({ claude, config }) {
         .map((block) => block.text)
         .join('');
 
+      pricing?.record(response.usage);
+
       return res.json({
         completion,
         stopReason: response.stop_reason,
         model: response.model,
         usage: response.usage,
+        // Computed server-side because the rates are configuration and have
+        // no business being shipped to the browser.
+        cost: pricing?.estimate(response.usage) ?? null,
       });
     }
 
@@ -98,11 +103,13 @@ function createClaudeRouter({ claude, config }) {
       }
 
       const final = await stream.finalMessage();
+      pricing?.record(final.usage);
       sse(res, {
         type: 'done',
         stopReason: final.stop_reason,
         model: final.model,
         usage: final.usage,
+        cost: pricing?.estimate(final.usage) ?? null,
       });
     } catch (err) {
       if (controller.signal.aborted) {
