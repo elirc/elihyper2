@@ -1,0 +1,18 @@
+# Keeps the build context small and, more importantly, makes it impossible to
+# bake a credential into an image by accident.
+.env
+.env.*
+!.env.example
+
+node_modules/
+npm-debug.log*
+*.log
+
+# Not needed at runtime. Excluding tests also means a failing test cannot be
+# what makes an image ship late - CI runs them, the image does not carry them.
+test/
+*.md
+Dockerfile
+.dockerignore
+.git/
+.github/
