@@ -50,9 +50,44 @@
       }
     }
 
+    // Playback is routed through a Web Audio graph so it can be recorded.
+    // Built lazily: constructing an AudioContext before a user gesture is
+    // blocked by autoplay policy in most browsers.
+    let context = null;
+    let recordingDestination = null;
+    // createMediaElementSource throws if called twice on the same element, so
+    // every element's source node is remembered.
+    const sources = new WeakMap();
+
+    function ensureGraph() {
+      if (context) return;
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return;
+      context = new AudioContextCtor();
+      recordingDestination = context.createMediaStreamDestination();
+    }
+
+    function getRecordingStream() {
+      ensureGraph();
+      return recordingDestination ? recordingDestination.stream : null;
+    }
+
+    function route(element) {
+      ensureGraph();
+      if (!context) return;
+      if (sources.has(element)) return;
+
+      const source = context.createMediaElementSource(element);
+      // Both: the speakers so the user hears it, and the recording tap.
+      source.connect(context.destination);
+      source.connect(recordingDestination);
+      sources.set(element, source);
+    }
+
     function playUrl(url) {
       return new Promise((resolve) => {
         audio = new Audio(url);
+        audio.crossOrigin = 'anonymous';
         const done = () => {
           URL.revokeObjectURL(url);
           audio = null;
@@ -60,6 +95,15 @@
         };
         audio.onended = done;
         audio.onerror = done;
+
+        try {
+          route(audio);
+          context?.resume?.();
+        } catch {
+          // Routing failed (no Web Audio, or a browser quirk). Playback still
+          // works through the element itself; only recording is lost.
+        }
+
         audio.play().catch(done);
       });
     }
@@ -127,6 +171,7 @@
       stop,
       setVoice,
       setMuted,
+      getRecordingStream,
       isMuted: () => muted,
       isSpeaking: () => playing,
     };

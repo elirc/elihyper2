@@ -68,7 +68,14 @@
 
     <div class="button-row" style="margin-top:1rem">
       <button id="reset" type="button" class="secondary">New conversation</button>
+      <button id="record" type="button" class="secondary">Start recording</button>
+      <button id="save-recording" type="button" class="secondary" disabled>Save recording</button>
+      <span class="status" id="record-status" role="status" data-state="idle" hidden>Recording</span>
     </div>
+    <p class="hint">
+      Recording captures the assistant's spoken replies only. Your microphone is
+      never recorded.
+    </p>
 
     <details class="debug">
       <summary>Debug log</summary>
@@ -88,6 +95,8 @@
   <script src="/js/transcriber.js"></script>
   <script src="/js/chat.js"></script>
   <script src="/js/speaker.js"></script>
+  <script src="/js/filename.js"></script>
+  <script src="/js/recorder.js"></script>
   <script>
     (function () {
       'use strict';
@@ -312,6 +321,48 @@
           event.preventDefault();
           stopListening();
         }
+      });
+
+      // --- recording --------------------------------------------------------
+
+      const recordButton = $('record');
+      const saveButton = $('save-recording');
+      const recordStatus = $('record-status');
+      let lastRecording = null;
+
+      const recorder = window.Recorder.createRecorder({
+        onStateChange(recorderState) {
+          const active = recorderState === 'recording';
+          recordButton.textContent = active ? 'Stop recording' : 'Start recording';
+          recordStatus.hidden = !active;
+          recordStatus.dataset.state = active ? 'listening' : 'idle';
+        },
+        onWarning(message) { errorBox.textContent = message; },
+      });
+
+      if (!recorder.isSupported()) {
+        recordButton.disabled = true;
+        recordButton.title = 'Recording is not supported in this browser';
+      }
+
+      recordButton.addEventListener('click', async () => {
+        errorBox.textContent = '';
+        if (recorder.isRecording()) {
+          lastRecording = await recorder.stop();
+          saveButton.disabled = lastRecording === null;
+          return;
+        }
+        // The stream comes from the speaker's own audio graph, so only the
+        // assistant's output is captured - the microphone is not in it.
+        const started = recorder.start(speaker.getRecordingStream());
+        if (started) {
+          lastRecording = null;
+          saveButton.disabled = true;
+        }
+      });
+
+      saveButton.addEventListener('click', () => {
+        recorder.download(lastRecording, `nova-session-${window.Filename.timestamp()}`);
       });
 
       $('reset').addEventListener('click', () => {
