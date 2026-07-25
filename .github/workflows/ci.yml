@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The default GITHUB_TOKEN is far broader than this workflow needs. Narrow it
+# here rather than relying on the repository-wide default, which can change.
+permissions:
+  contents: read
+
+concurrency:
+  # Cancel an in-flight run when a branch is pushed again: the older result is
+  # about to be irrelevant and is only holding up a runner.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test on Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Without this, one version failing cancels the other and you only find
+      # out about half the problem.
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          # setup-node is an action, not a `run` step, so defaults.run does not
+          # apply to it and the path has to be spelled out.
+          cache-dependency-path: app/package-lock.json
+
+      # `npm ci`, not `npm install`: it installs exactly what the lockfile says
+      # and fails if package.json and the lockfile disagree. That is what you
+      # want in CI, where a silently different dependency tree is a bug.
+      - run: npm ci
+
+      - run: npm test
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+
+      # Reports findings without failing the build. A blocking audit on a
+      # transitive advisory nobody can action just teaches people to ignore
+      # red checks, which is worse than the advisory.
+      - run: npm audit --audit-level=high || true
