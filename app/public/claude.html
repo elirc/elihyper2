@@ -86,6 +86,7 @@
   <script src="/js/commands.js"></script>
   <script src="/js/palette.js"></script>
   <script src="/js/theme.js"></script>
+  <script src="/js/http.js"></script>
   <script src="/js/markdown.js"></script>
   <script src="/js/presets.js"></script>
   <script src="/js/prompts.js"></script>
@@ -214,7 +215,32 @@
             scroll();
           }
         },
+        onRetry({ attempt, of, delay }) {
+          // Visible, not silent: a four-second pause with no explanation
+          // reads as the app having hung.
+          status.dataset.state = 'connecting';
+          status.textContent =
+            `Retrying in ${Math.round(delay / 1000)}s… attempt ${attempt} of ${of}`;
+        },
       });
+
+      function showRetry() {
+        if (!chat.hasRetryable()) return;
+        const button = actionButton('Retry', 'Retry the failed message', async () => {
+          button.remove();
+          setBusy(true);
+          try {
+            await chat.retryLast();
+          } catch (err) {
+            errorBox.textContent = err.message;
+            showRetry();
+          } finally {
+            setBusy(false);
+            renderTranscript(chat.getMessages());
+          }
+        });
+        errorBox.appendChild(button);
+      }
 
       // --- saved conversations -------------------------------------------
 
@@ -467,6 +493,7 @@
           if (!currentAnswerEl.textContent.trim() || currentAnswerEl.querySelector('.hint')) {
             answer.turn.remove();
           }
+          showRetry();
         } finally {
           currentAnswerEl = null;
           setBusy(false);

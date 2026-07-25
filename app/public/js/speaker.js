@@ -31,7 +31,10 @@
       const controller = new AbortController();
       controllers.add(controller);
       try {
-        const response = await fetch('/speak', {
+        // Shared retry policy: a 503 from Polly is worth one more try, a 400
+        // is not. See http.js.
+        const http = window.Http.createHttp();
+        const response = await http.request('/speak', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, voiceId, engine }),
