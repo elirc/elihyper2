@@ -23,7 +23,7 @@
     mount.innerHTML = `<ul>${PAGES.map(
       ({ href, label }) =>
         `<li><a href="${href}"${href === here ? ' aria-current="page"' : ''}>${label}</a></li>`
-    ).join('')}</ul>`;
+    ).join('')}<li><button type="button" class="theme-toggle" data-theme-toggle aria-label="Theme"></button></li></ul>`;
   }
 
   if (document.readyState === 'loading') {
