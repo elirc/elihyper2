@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard — Nova</title>
+  <meta name="theme-color" content="#f7f7f8" />
+  <script>
+    // Inline and render-blocking on purpose - see claude.html.
+    try {
+      var t = localStorage.getItem('nova.theme');
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <nav class="site-nav" data-nav aria-label="Primary"></nav>
+
+  <main class="page" id="main">
+    <h1>Dashboard</h1>
+    <p class="lede">
+      Request volume, latency, cache, and token usage for this server process.
+    </p>
+
+    <div class="alert" id="error" role="alert"></div>
+
+    <div class="button-row" style="margin-bottom:1rem">
+      <button id="refresh" type="button" class="secondary">Refresh now</button>
+      <button id="pause" type="button" class="secondary" aria-pressed="false">Pause auto-refresh</button>
+      <span class="status" id="status" role="status" data-state="idle">Loading…</span>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Totals</h2>
+      <dl class="stat-grid" id="totals"></dl>
+      <p class="hint" id="scope-note"></p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Tokens and cost</h2>
+      <dl class="stat-grid" id="tokens"></dl>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Speech cache</h2>
+      <dl class="stat-grid" id="cache"></dl>
+    </div>
+
+    <h2>By route</h2>
+    <div style="overflow-x:auto">
+      <table class="metrics-table">
+        <thead>
+          <tr>
+            <th scope="col">Route</th>
+            <th scope="col">Requests</th>
+            <th scope="col">Errors</th>
+            <th scope="col">p50 ms</th>
+            <th scope="col">p95 ms</th>
+            <th scope="col">p99 ms</th>
+          </tr>
+        </thead>
+        <tbody id="routes"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="/js/nav.js"></script>
+  <script src="/js/commands.js"></script>
+  <script src="/js/palette.js"></script>
+  <script src="/js/theme.js"></script>
+  <script src="/js/http.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      const $ = (id) => document.getElementById(id);
+      const status = $('status');
+      const errorBox = $('error');
+      const http = window.Http.createHttp();
+
+      let timer = null;
+      let paused = false;
+
+      function stat(list, label, value) {
+        const dt = document.createElement('dt');
+        dt.textContent = label;
+        const dd = document.createElement('dd');
+        dd.textContent = value;
+        list.append(dt, dd);
+      }
+
+      function renderTotals(data) {
+        const list = $('totals');
+        list.replaceChildren();
+        stat(list, 'Requests', data.totals.requests.toLocaleString());
+        stat(list, 'Errors', data.totals.errors.toLocaleString());
+        stat(list, 'Error rate', `${(data.totals.errorRate * 100).toFixed(1)}%`);
+        stat(list, 'Uptime', `${Math.floor(data.uptimeSeconds / 60)}m ${data.uptimeSeconds % 60}s`);
+        $('scope-note').textContent = data.note;
+      }
+
+      function renderTokens(data) {
+        const list = $('tokens');
+        list.replaceChildren();
+        const tokens = data.tokens;
+        if (!tokens) {
+          stat(list, 'Tokens', 'unavailable');
+          return;
+        }
+        stat(list, 'Requests', tokens.requests.toLocaleString());
+        stat(list, 'Input tokens', tokens.inputTokens.toLocaleString());
+        stat(list, 'Output tokens', tokens.outputTokens.toLocaleString());
+        stat(list, 'Cached input', tokens.cachedInputTokens.toLocaleString());
+        // Honest about not knowing, rather than rendering $0 and implying free.
+        stat(
+          list,
+          'Estimated cost',
+          tokens.ratesConfigured
+            ? `~$${Number(tokens.estimatedCost).toFixed(4)}`
+            : 'unavailable — rates not configured'
+        );
+      }
+
+      function renderCache(data) {
+        const list = $('cache');
+        list.replaceChildren();
+        const cache = data.cache;
+        if (!cache) { stat(list, 'Cache', 'unavailable'); return; }
+
+        const lookups = cache.hits + cache.misses;
+        stat(list, 'Entries', cache.entries.toLocaleString());
+        stat(list, 'Size', `${(cache.bytes / 1024).toFixed(0)} KB`);
+        stat(list, 'Hits', cache.hits.toLocaleString());
+        stat(list, 'Hit rate', lookups === 0 ? '—' : `${((cache.hits / lookups) * 100).toFixed(0)}%`);
+      }
+
+      function renderRoutes(data) {
+        const body = $('routes');
+        body.replaceChildren();
+
+        const entries = Object.entries(data.routes)
+          .sort((a, b) => b[1].requests - a[1].requests);
+
+        if (entries.length === 0) {
+          const row = document.createElement('tr');
+          const cell = document.createElement('td');
+          cell.colSpan = 6;
+          cell.className = 'hint';
+          cell.textContent = 'No requests recorded yet.';
+          row.appendChild(cell);
+          body.appendChild(row);
+          return;
+        }
+
+        for (const [route, summary] of entries) {
+          const row = document.createElement('tr');
+          for (const value of [
+            route,
+            summary.requests.toLocaleString(),
+            summary.errors.toLocaleString(),
+            summary.latencyMs.p50,
+            summary.latencyMs.p95,
+            summary.latencyMs.p99,
+          ]) {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            row.appendChild(cell);
+          }
+          body.appendChild(row);
+        }
+      }
+
+      async function refresh() {
+        try {
+          const response = await http.request('/metrics');
+          if (!response.ok) throw new Error(`Metrics request failed (${response.status})`);
+          const data = await response.json();
+
+          renderTotals(data);
+          renderTokens(data);
+          renderCache(data);
+          renderRoutes(data);
+
+          errorBox.textContent = '';
+          status.dataset.state = 'idle';
+          status.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+        } catch (err) {
+          errorBox.textContent = err.message;
+          status.dataset.state = 'error';
+          status.textContent = 'Failed';
+        }
+      }
+
+      function schedule() {
+        clearInterval(timer);
+        if (!paused) timer = setInterval(refresh, 5000);
+      }
+
+      $('refresh').addEventListener('click', refresh);
+      $('pause').addEventListener('click', () => {
+        paused = !paused;
+        $('pause').textContent = paused ? 'Resume auto-refresh' : 'Pause auto-refresh';
+        $('pause').setAttribute('aria-pressed', String(paused));
+        schedule();
+      });
+
+      window.Commands.register({
+        id: 'dashboard.refresh',
+        label: 'Refresh the dashboard',
+        run: refresh,
+      });
+
+      refresh();
+      schedule();
+    })();
+  </script>
+</body>
+</html>
