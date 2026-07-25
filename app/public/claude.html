@@ -73,6 +73,8 @@
   </main>
 
   <script src="/js/nav.js"></script>
+  <script src="/js/commands.js"></script>
+  <script src="/js/palette.js"></script>
   <script src="/js/markdown.js"></script>
   <script src="/js/presets.js"></script>
   <script src="/js/filename.js"></script>
@@ -643,6 +645,48 @@
         );
         if (result.title) store.rename(created.id, result.title);
         openConversation(created.id);
+      });
+
+      // --- commands ---------------------------------------------------------
+
+      window.Commands.register({
+        id: 'chat.new',
+        label: 'New conversation',
+        shortcut: 'mod+shift+o',
+        worksWhileTyping: true,
+        available: () => !chat.isBusy(),
+        run: () => { startNewConversation(); input.focus(); },
+      });
+
+      window.Commands.register({
+        id: 'chat.focus',
+        label: 'Focus the message box',
+        shortcut: 'mod+shift+l',
+        worksWhileTyping: true,
+        run: () => input.focus(),
+      });
+
+      window.Commands.register({
+        id: 'chat.stop',
+        label: 'Stop generating',
+        shortcut: 'escape',
+        worksWhileTyping: true,
+        available: () => chat.isBusy(),
+        run: () => chat.abort(),
+      });
+
+      window.Commands.register({
+        id: 'chat.export.md',
+        label: 'Export conversation as Markdown',
+        available: () => chat.getMessages().length > 0,
+        run: () => $('export-md').click(),
+      });
+
+      window.Commands.register({
+        id: 'chat.export.json',
+        label: 'Export conversation as JSON',
+        available: () => chat.getMessages().length > 0,
+        run: () => $('export-json').click(),
       });
 
       renderSidebar();
