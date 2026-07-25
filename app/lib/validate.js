@@ -84,6 +84,66 @@ function normaliseSpeechText(text, { maxCharacters, textType }) {
   return text;
 }
 
+// Prosody controls, expressed as percentages so they map straight onto SSML.
+const PROSODY_LIMITS = {
+  rate: { min: 50, max: 200, default: 100 },
+  pitch: { min: -50, max: 50, default: 0 },
+  volume: { min: -20, max: 20, default: 0 },
+};
+
+function normaliseProsody(input = {}) {
+  const result = {};
+  for (const [name, limits] of Object.entries(PROSODY_LIMITS)) {
+    const raw = input[name];
+    if (raw === undefined || raw === null || raw === '') {
+      result[name] = limits.default;
+      continue;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      throw badRequest(`${name} must be a number`);
+    }
+    if (value < limits.min || value > limits.max) {
+      throw badRequest(`${name} must be between ${limits.min} and ${limits.max}`);
+    }
+    // Rounded to an integer so the value cannot smuggle anything unusual into
+    // an SSML attribute.
+    result[name] = Math.round(value);
+  }
+  result.isDefault =
+    result.rate === PROSODY_LIMITS.rate.default &&
+    result.pitch === PROSODY_LIMITS.pitch.default &&
+    result.volume === PROSODY_LIMITS.volume.default;
+  return result;
+}
+
+function escapeXml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+// Wrapping plain text in SSML turns it into markup, so it MUST be escaped
+// first. Without this, a user typing "</prosody><prosody rate='x-slow'>" can
+// inject arbitrary SSML and change what is spoken.
+//
+// The attribute values are built from integers that normaliseProsody has
+// already validated - never from raw request strings.
+function wrapInProsody(text, prosody) {
+  // The unit is a parameter, not baked in: pitch is a percentage and volume
+  // is decibels. An earlier version hardcoded '%' here and produced
+  // volume="+5%dB", which Polly rejects.
+  const signed = (value, unit) => `${value >= 0 ? '+' : ''}${value}${unit}`;
+
+  return (
+    `<speak><prosody rate="${prosody.rate}%" pitch="${signed(prosody.pitch, '%')}" ` +
+    `volume="${signed(prosody.volume, 'dB')}">${escapeXml(text)}</prosody></speak>`
+  );
+}
+
 function oneOf(value, allowed, field, fallback) {
   if (value === undefined || value === null || value === '') return fallback;
   if (!allowed.includes(value)) {
@@ -96,5 +156,9 @@ module.exports = {
   normaliseMessages,
   normaliseSystemPrompt,
   normaliseSpeechText,
+  normaliseProsody,
+  wrapInProsody,
+  escapeXml,
   oneOf,
+  PROSODY_LIMITS,
 };
