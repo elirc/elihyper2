@@ -4,6 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Ask Claude — Nova</title>
+  <meta name="theme-color" content="#f7f7f8" />
+  <script>
+    // Deliberately inline and render-blocking. Any later than this and the
+    // default theme paints first, producing a visible flash before the stored
+    // preference is applied.
+    try {
+      var t = localStorage.getItem('nova.theme');
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
   <link rel="stylesheet" href="/css/app.css" />
 </head>
 <body>
@@ -75,6 +85,7 @@
   <script src="/js/nav.js"></script>
   <script src="/js/commands.js"></script>
   <script src="/js/palette.js"></script>
+  <script src="/js/theme.js"></script>
   <script src="/js/markdown.js"></script>
   <script src="/js/presets.js"></script>
   <script src="/js/prompts.js"></script>
