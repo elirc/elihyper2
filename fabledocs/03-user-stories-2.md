@@ -1,5 +1,14 @@
 # 03 — Backlog: 15 more user stories (21–35)
 
+> **Status: all fifteen are delivered**, each through its own pull request.
+> This repository is a snapshot of the merged result and has no pull requests
+> of its own; the PRs live in the canonical repo
+> [elirc/3build-nova](https://github.com/elirc/3build-nova/pulls?q=is%3Apr)
+> (story 21 → PR #1 … story 35 → PR #15; #16 fixed the CI runner on Node 20).
+> The same merges appear here in `git log`. This document is kept as the
+> record of what each story was judged against — the reasoning behind each
+> implementation is in the PR that delivered it.
+
 The second wave, written after the v2 app in [`../app`](../app) shipped. Stories
 01–20 are in [02-user-stories.md](./02-user-stories.md) and are all delivered.
 
